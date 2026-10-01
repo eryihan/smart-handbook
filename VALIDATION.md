@@ -1,6 +1,6 @@
 # V1 验证记录
 
-日期：2026-10-01。
+日期：2026-10-02。
 
 ## 检查结果
 
@@ -9,7 +9,7 @@
 | 页面与状态格式 | 通过 | metadata、状态 schema、模板结构及关联 |
 | Python 工具 | 46 个测试通过 | 临时 Java 文本、配置和 Git fixture |
 | 文档 | 通过 | 最小 frontmatter、本地链接、模板实例化 |
-| Claude Code | 本地安装与命令发现通过 | marketplace 注册、安装、核心 Skill 和五个命令 |
+| Claude Code | 本地安装与命令发现通过 | marketplace 注册、安装、核心 Skill 和六个命令 |
 | Codex | 本地 marketplace 发现通过 | 列出插件；安装和任务执行未验证 |
 | GitHub 分发 | 未验证 | 远端安装 |
 | 真实项目任务 | 未验证 | 项目理解、开发、排障、维护 |
@@ -43,6 +43,8 @@ Python 编译、最小 frontmatter 和本地链接检查通过；模板链接在
 
 五个 command 包装设置 `disable-model-invocation: true` 后，会话仍能发现全部 slash command。通过临时本地端点检查请求中的 Skill 列表，自动选择只包含 `smart_handbook:smart_handbook`，五个包装均未列入。端点返回错误结束检查，未执行模型推理。
 
+2026-10-02 加入 help 后，隔离会话的初始化事件发现 help、init、work、update、audit、status 六个 slash command 和通用 Skill 入口。help 包装同样设置 `disable-model-invocation: true`。46 个 Python 测试和两份 manifest 校验再次通过。
+
 ## Codex
 
 使用临时配置覆盖读取本地 marketplace：`plugin list --available --marketplace smart-handbook --json` 返回 `smart_handbook@smart-handbook`、版本 `0.1.0`，状态为未安装、未启用。结果限于插件发现。
@@ -53,6 +55,7 @@ Python 编译、最小 frontmatter 和本地链接检查通过；模板链接在
 
 | 场景 | 请求 | 预期结果 |
 |---|---|---|
+| 帮助，无 Handbook | `handbook help` 或无参数通用入口 | 展示命令、参数和示例，不扫描源码、不创建 `.smart_handbook/` |
 | 普通任务，无 Handbook | “解释这个方法” | 完成解释，不创建 `.smart_handbook/` |
 | 首次建立 | “为这个项目建立 Handbook” | 进入 init，建立导航，关联源码证据 |
 | 状态查询 | `handbook status` | 只读已有知识和状态，不扫描源码或运行 check / impact |
