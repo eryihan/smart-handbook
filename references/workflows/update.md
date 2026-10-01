@@ -2,6 +2,8 @@
 
 根据源码变化形成候选范围，再阅读代码决定局部更新内容。
 
+无 Handbook 时报告尚未建立，不自动初始化。
+
 ## 识别与复核
 
 1. 读取 `.smart_handbook/.state.json` 和现有 metadata，保留旧来源关联。确认基线、目标 commit / worktree，以及未提交修改是否在比较范围内。
@@ -35,3 +37,7 @@ python3 "<skill-directory>/scripts/handbook.py" check --root "<project-directory
 Python 不可用时手工比较和核对，记录 `automated check unavailable`。Git 不可用时只比较已有指纹；该范围无法覆盖新增、未引用文件或间接依赖，不能据此报告全库无变化。
 
 CLI 与状态写入要求见[格式契约](../schema.md)。
+
+## 交付
+
+说明比较的基线与目标、实际复核范围、候选项的处置和修改页面。报告检查及行为验证结果、仍待复核的范围，以及 `baseline.commit` 是否推进；局部更新明确说明保留旧基线。
