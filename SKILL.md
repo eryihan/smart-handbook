@@ -1,6 +1,6 @@
 ---
 name: smart_handbook
-description: Build and maintain source-backed project knowledge in .smart_handbook/. Use when users request handbook init, work, update, audit, or status; ask to establish or rebuild a project handbook; or need to use an existing .smart_handbook/ for understanding, development, debugging, or maintenance.
+description: Build and maintain source-backed project knowledge in .smart_handbook/. Use when users request handbook help, init, work, update, audit, or status; ask how to use this skill or to establish or rebuild a project handbook; or need to use an existing .smart_handbook/ for understanding, development, debugging, or maintenance.
 ---
 
 # Smart Handbook
@@ -11,10 +11,13 @@ description: Build and maintain source-backed project knowledge in .smart_handbo
 
 逻辑命令为普通文本 `handbook <command>`。自然语言进入同一套流程；没有明确命令时，默认 work，再识别 understand、development、debugging 或 maintenance。
 
+`handbook` 或通用 Skill 入口无参数时进入 help。`handbook help [command]` 和“这个 Skill 怎么用”显示命令用途、参数和示例；只读取[命令说明](references/commands.md)，不扫描目标仓库或执行工具。
+
 普通开发、排障或解释请求在没有 `.smart_handbook/` 时按原任务处理，不自动初始化。只有明确要求建立或重建时进入 init。
 
 | 请求 | 按需读取 |
 |---|---|
+| 查看用法、参数或示例 | [help](references/commands.md) |
 | 首次建立，或明确重建 | [init](references/workflows/init.md) |
 | 理解、开发、排障、维护 | [work](references/workflows/work.md) |
 | 代码变化后更新 Handbook | [update](references/workflows/update.md) |
