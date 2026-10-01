@@ -1,6 +1,6 @@
 ---
-name: smart_handbook
-description: Build and maintain source-backed project knowledge in .smart_handbook/. Use for Smart Handbook commands or usage questions, explicit requests to establish or rebuild a project handbook, and understanding, development, debugging, or maintenance tasks in projects with an existing .smart_handbook/.
+name: smart-handbook
+description: Build and maintain source-backed project knowledge in .smart-handbook/. Use for Smart Handbook commands or usage questions, explicit requests to establish or rebuild a project handbook, and understanding, development, debugging, or maintenance tasks in projects with an existing .smart-handbook/.
 ---
 
 # Smart Handbook
@@ -13,7 +13,7 @@ description: Build and maintain source-backed project knowledge in .smart_handbo
 
 `handbook` 或通用 Skill 入口无参数时进入 help。`handbook help [command]` 和 Smart Handbook 的使用问题显示命令用途、参数、默认行为、写入范围和示例；只读取[命令说明](references/commands.md)，不扫描目标仓库，不运行脚本或测试。展示帮助后结束，不执行示例中的命令。
 
-普通开发、排障或解释请求在没有 `.smart_handbook/` 时按原任务处理，不自动初始化。只有明确要求建立或重建时进入 init。
+普通开发、排障或解释请求在没有 `.smart-handbook/` 时按原任务处理，不自动初始化。只有明确要求建立或重建时进入 init。
 
 | 请求 | 按需读取 |
 |---|---|
@@ -29,7 +29,7 @@ description: Build and maintain source-backed project knowledge in .smart_handbo
 ## 执行约束
 
 - 确认目标仓库、代码版本和 worktree。用现有导航缩小源码阅读范围；页面缺失时直接读代码，引用失效时重新定位。
-- 项目知识写入目标仓库的 `.smart_handbook/`。模板和脚本从 Skill 安装目录读取。
+- 项目知识写入目标仓库的 `.smart-handbook/`。模板和脚本从 Skill 安装目录读取。
 - 全局概念写入 system，单模块行为写入 module，跨模块交接写入 flow。README 和 map 保留导航，同一结论只维护一处。
 - 部署版本、外部协议、运行数据或验证结果缺少证据时，保留 unknown / unverified。
 - Python 检查格式、路径、文本定位、指纹和 diff；候选影响由 Agent 阅读代码确认。覆盖、来源状态、AI 复核和行为验证分别记录。

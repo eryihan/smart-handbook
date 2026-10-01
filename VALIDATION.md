@@ -9,7 +9,7 @@
 | 页面与状态格式 | 通过 | metadata、状态 schema、模板结构及关联 |
 | Python 工具 | 46 个测试通过 | 临时 Java 文本、配置和 Git fixture |
 | 文档 | 通过 | 最小 frontmatter、本地链接、模板实例化 |
-| Claude Code | 本地安装与命令发现通过 | marketplace 注册、安装、核心 Skill 和六个命令 |
+| Claude Code | 本地安装与组件发现通过 | marketplace 注册、安装、核心 Skill 和六个命令的组件发现；改名后会话发现未验证 |
 | Codex | 本地 marketplace 发现通过 | 列出插件；安装和任务执行未验证 |
 | GitHub 分发 | 未验证 | 远端安装 |
 | 真实项目任务 | 未验证 | 项目理解、开发、排障、维护 |
@@ -29,25 +29,21 @@ python3 -m unittest discover -s tests -v
 - 来源修改、删除、改名、Java 简单 symbol 和不支持语法。
 - 状态损坏、来源集合变化、复核时间与验证记录。
 - Git / 基线缺失、脏工作区、暂存改名、指定目标、无效 ref、旧引用和删除页面关联。
-- `.smart_handbook/` 读取、旧状态路径拒绝、知识文件变化排除及工具只读行为。
+- `.smart-handbook/` 读取、旧状态路径拒绝、知识文件变化排除及工具只读行为。
 
 Python 编译、最小 frontmatter 和本地链接检查通过；模板链接在实例化后的 Handbook 中检查。通用 Skill 校验脚本因缺少 PyYAML 未执行。
 
 ## Claude Code
 
-版本：2.1.283。两份 manifest 被原生 validator 接受，无 schema 或路径错误；插件名称触发 kebab-case 警告，Claude Code 接受 `smart_handbook`。
+版本：2.1.283。改名后，两份 manifest 均通过原生 validator，无 schema、路径或命名警告。
 
-隔离配置中注册 `smart-handbook`，安装 `smart_handbook@smart-handbook` 返回 `outcome=ok`。`plugin details` 列出核心 Skill 和五个工作流，会话初始化事件发现全部五个 `smart_handbook:<command>`。
+在临时 `CLAUDE_CONFIG_DIR` 中注册本地 marketplace，安装 `smart-handbook@smart-handbook` 返回 `outcome=ok`。`plugin details` 列出核心 Skill 和 help、init、work、update、audit、status 六个命令。结果限于配置校验、安装和组件发现，未运行模型任务。
 
-发现检查禁用工具、hooks 和 MCP，API 指向不可用的本地端口。该检查未运行模型任务，结果限于安装和命令发现。
-
-五个 command 包装设置 `disable-model-invocation: true` 后，会话仍能发现全部 slash command。通过临时本地端点检查请求中的 Skill 列表，自动选择只包含 `smart_handbook:smart_handbook`，五个包装均未列入。端点返回错误结束检查，未执行模型推理。
-
-2026-10-02 加入 help 后，隔离会话的初始化事件发现 help、init、work、update、audit、status 六个 slash command 和通用 Skill 入口。help 包装同样设置 `disable-model-invocation: true`。46 个 Python 测试和两份 manifest 校验再次通过。
+改名前曾通过隔离会话的初始化事件检查六个 slash command，并通过本地临时端点检查包装命令不参与自动选择。改名后的会话命令发现和实际路由尚未验证。
 
 ## Codex
 
-使用临时配置覆盖读取本地 marketplace：`plugin list --available --marketplace smart-handbook --json` 返回 `smart_handbook@smart-handbook`、版本 `0.1.0`，状态为未安装、未启用。结果限于插件发现。
+使用临时配置覆盖读取本地 marketplace，`plugin list --available --marketplace smart-handbook --json` 返回 `smart-handbook@smart-handbook`、版本 `0.1.2`，状态为未安装、未启用。结果限于插件发现。
 
 ## 待完成验收
 
@@ -57,8 +53,8 @@ Python 编译、最小 frontmatter 和本地链接检查通过；模板链接在
 
 | 场景 | 请求 | 预期结果 |
 |---|---|---|
-| 帮助，无 Handbook | `handbook help` 或无参数通用入口 | 展示命令、参数和示例，不扫描源码、不创建 `.smart_handbook/` |
-| 普通任务，无 Handbook | “解释这个方法” | 完成解释，不创建 `.smart_handbook/` |
+| 帮助，无 Handbook | `handbook help` 或无参数通用入口 | 展示命令、参数和示例，不扫描源码、不创建 `.smart-handbook/` |
+| 普通任务，无 Handbook | “解释这个方法” | 完成解释，不创建 `.smart-handbook/` |
 | 首次建立 | “为这个项目建立 Handbook” | 进入 init，建立导航，关联源码证据 |
 | 状态查询 | `handbook status` | 只读已有知识和状态，不扫描源码或运行 check / impact |
 | 局部更新 | “只更新审批模块的 Handbook” | 先分析候选和源码，仅更新相关页面，保留全库旧基线 |

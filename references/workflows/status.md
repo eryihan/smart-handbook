@@ -1,6 +1,6 @@
 # handbook status
 
-读取 `.smart_handbook/` 中已有页面和 `.state.json`，展示已记录状态。该工作流不扫描源码，不执行 `check`、`impact` 或测试。
+读取 `.smart-handbook/` 中已有页面和 `.state.json`，展示已记录状态。该工作流不扫描源码，不执行 `check`、`impact` 或测试。
 
 ## 查询内容
 

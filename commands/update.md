@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 执行 `handbook update`。读取 `${CLAUDE_PLUGIN_ROOT}/SKILL.md` 的公共约束，再读取 `${CLAUDE_PLUGIN_ROOT}/references/workflows/update.md`。
 
-此入口固定为 update；后续参数作为比较范围。项目知识位于目标仓库的 `.smart_handbook/`，资源从插件目录读取。
+此入口固定为 update；后续参数作为比较范围。项目知识位于目标仓库的 `.smart-handbook/`，资源从插件目录读取。
 
 $ARGUMENTS
 

@@ -1,35 +1,53 @@
 # Smart Handbook
 
-`smart_handbook` 为代码项目建立和维护 Handbook，用于理解项目、开发、排障和维护。项目知识保存在 `.smart_handbook/`，通过模块导航和源码引用定位任务上下文；具体行为以任务目标版本的实现为准。
+`smart-handbook` 为代码项目建立和维护 Handbook，用于理解项目、开发、排障和维护。项目知识保存在 `.smart-handbook/`，通过模块导航和源码引用定位任务上下文；具体行为以任务目标版本的实现为准。
 
 ## 安装
 
 ### Claude Code
 
 ```sh
-claude plugin marketplace add eryihan/smart_handbook
-claude plugin install smart_handbook@smart-handbook
+claude plugin marketplace add eryihan/smart-handbook
+claude plugin install smart-handbook@smart-handbook
 ```
 
 ### Codex
 
 ```sh
-codex plugin marketplace add eryihan/smart_handbook
-codex plugin add smart_handbook@smart-handbook
+codex plugin marketplace add eryihan/smart-handbook
+codex plugin add smart-handbook@smart-handbook
+```
+
+### 离线安装
+
+从 [Releases](https://github.com/eryihan/smart-handbook/releases) 下载 `smart-handbook-<version>.zip`，解压后得到 `smart-handbook/`。将 `<plugin-directory>` 替换为该目录的绝对路径。
+
+Claude Code：
+
+```sh
+claude plugin marketplace add <plugin-directory>
+claude plugin install smart-handbook@smart-handbook
+```
+
+Codex：
+
+```sh
+codex plugin marketplace add <plugin-directory>
+codex plugin add smart-handbook@smart-handbook
 ```
 
 安装后，在目标项目中启动新会话。宿主内安装、本地开发和更新方式见 [Claude Code](references/claude-code.md) 与 [Codex](references/codex.md)。
 
 ## 首次使用
 
-以下命令输入到 Agent 会话中。Claude Code 使用 slash command；Codex 使用普通文本命令，也可通过 `$smart_handbook help` 明确调用 Skill。
+以下命令输入到 Agent 会话中。Claude Code 使用 slash command；Codex 使用普通文本命令，也可通过 `$smart-handbook help` 明确调用 Skill。
 
-1. 查看用法：Claude Code 输入 `/smart_handbook:help`，Codex 输入 `handbook help`。
-2. 为当前项目建立知识：输入 `/smart_handbook:init` 或 `handbook init`。它会读取项目代码，在 `.smart_handbook/` 中生成项目导航、系统说明、模块地图、工作指南和状态文件，并按项目需要编写模块及流程页面。首次建立不表示所有模块均已深入复核。
+1. 查看用法：Claude Code 输入 `/smart-handbook:help`，Codex 输入 `handbook help`。
+2. 为当前项目建立知识：输入 `/smart-handbook:init` 或 `handbook init`。它会读取项目代码，在 `.smart-handbook/` 中生成项目导航、系统说明、模块地图、工作指南和状态文件，并按项目需要编写模块及流程页面。首次建立不表示所有模块均已深入复核。
 3. 带着具体任务使用知识，例如：
 
    ```text
-   /smart_handbook:work 解释审批入口、状态变化和失败处理，并给出源码位置
+   /smart-handbook:work 解释审批入口、状态变化和失败处理，并给出源码位置
    ```
 
    Codex 对应输入 `handbook work 解释审批入口、状态变化和失败处理，并给出源码位置`。回答会结合 Handbook 和目标版本代码，指出证据及缺口。
@@ -40,21 +58,21 @@ codex plugin add smart_handbook@smart-handbook
 
 | 普通文本命令 | Claude Code slash command | 用途 |
 |---|---|---|
-| `handbook help [command]` | `/smart_handbook:help [command]` | 查看全部用法或指定命令的帮助 |
-| `handbook init` | `/smart_handbook:init` | 建立或重建 Handbook |
-| `handbook work <任务>` | `/smart_handbook:work <任务>` | 理解、开发、排障或维护 |
-| `handbook update` | `/smart_handbook:update` | 根据代码变化复核并更新相关页面 |
-| `handbook audit` | `/smart_handbook:audit` | 重新检查结构、来源、导航覆盖和关键内容 |
-| `handbook status` | `/smart_handbook:status` | 查看已记录的覆盖、复核、验证和缺口 |
+| `handbook help [command]` | `/smart-handbook:help [command]` | 查看全部用法或指定命令的帮助 |
+| `handbook init` | `/smart-handbook:init` | 建立或重建 Handbook |
+| `handbook work <任务>` | `/smart-handbook:work <任务>` | 理解、开发、排障或维护 |
+| `handbook update` | `/smart-handbook:update` | 根据代码变化复核并更新相关页面 |
+| `handbook audit` | `/smart-handbook:audit` | 重新检查结构、来源、导航覆盖和关键内容 |
+| `handbook status` | `/smart-handbook:status` | 查看已记录的覆盖、复核、验证和缺口 |
 
-查看单个命令的参数、默认行为和写入范围，例如 `handbook help update`，Claude Code 对应使用 `/smart_handbook:help update`。
+查看单个命令的参数、默认行为和写入范围，例如 `handbook help update`，Claude Code 对应使用 `/smart-handbook:help update`。
 
-项目已有 `.smart_handbook/` 时，也可直接描述任务，例如“审批结束了，但数据没有生效，帮我定位原因”。Skill 会进入对应工作流。参数和自然语言路由见[命令说明](references/commands.md)。
+项目已有 `.smart-handbook/` 时，也可直接描述任务，例如“审批结束了，但数据没有生效，帮我定位原因”。Skill 会进入对应工作流。参数和自然语言路由见[命令说明](references/commands.md)。
 
 ## 项目知识
 
 ```text
-.smart_handbook/
+.smart-handbook/
 ├── README.md                 项目定位与任务导航
 ├── system.md                 系统边界、全局概念与依赖
 ├── map.md                    模块索引、源码范围与未归属入口

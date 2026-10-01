@@ -12,7 +12,7 @@
 
 ## 分批建页
 
-在目标仓库创建 `.smart_handbook/`，从[模板目录](../../assets/handbook/)生成 README、system、map、working-guide，创建 modules 和 flows 目录。填写真实项目内容，替换示例名称与 ID；格式见[契约](../schema.md)。
+在目标仓库创建 `.smart-handbook/`，从[模板目录](../../assets/handbook/)生成 README、system、map、working-guide，创建 modules 和 flows 目录。填写真实项目内容，替换示例名称与 ID；格式见[契约](../schema.md)。
 
 先编写 system 的边界、概念、状态、数据、依赖、配置来源和本地验证条件。随后按失败影响、使用频率、跨模块复杂度、知识缺失、恢复难度和任务相关性选择深入顺序。
 

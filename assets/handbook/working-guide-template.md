@@ -12,9 +12,9 @@
 
 ## 从任务找到页面
 
-项目知识位于仓库根目录的 `.smart_handbook/`。从 [README](./README.md) 的业务词、症状、入口或编号进入 [map](./map.md)，读取直接相关的 module / flow。缺少页面时直接阅读代码并记录知识缺口。
+项目知识位于仓库根目录的 `.smart-handbook/`。从 [README](./README.md) 的业务词、症状、入口或编号进入 [map](./map.md)，读取直接相关的 module / flow。缺少页面时直接阅读代码并记录知识缺口。
 
-安装 smart_handbook 后，使用 `handbook help` 查看用法，或执行 `handbook init`、`handbook work <任务>`、`handbook update`、`handbook audit`、`handbook status`。Claude Code plugin 提供对应的 `/smart_handbook:<command>`。
+安装 smart-handbook 后，使用 `handbook help` 查看用法，或执行 `handbook init`、`handbook work <任务>`、`handbook update`、`handbook audit`、`handbook status`。Claude Code plugin 提供对应的 `/smart-handbook:<command>`。
 
 ## 核对目标版本与来源
 

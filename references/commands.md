@@ -13,12 +13,12 @@
 
 | 普通文本命令 | Claude Code 入口 | 任务示例 | 工作流 |
 |---|---|---|---|
-| `handbook help [command]` | `/smart_handbook:help [command]` | 查看全部用法或指定命令的帮助 | 本页 |
-| `handbook init` | `/smart_handbook:init` | 为项目建立 Handbook；从代码重建知识 | [init](workflows/init.md) |
-| `handbook work <task>` | `/smart_handbook:work <task>` | 解释审批流程；增加撤回；定位数据未生效；判断补偿能否重跑 | [work](workflows/work.md) |
-| `handbook update` | `/smart_handbook:update` | 根据代码变化更新 Handbook | [update](workflows/update.md) |
-| `handbook audit` | `/smart_handbook:audit` | 检查过期、覆盖与关键内容 | [audit](workflows/audit.md) |
-| `handbook status` | `/smart_handbook:status` | 查看已记录状态 | [status](workflows/status.md) |
+| `handbook help [command]` | `/smart-handbook:help [command]` | 查看全部用法或指定命令的帮助 | 本页 |
+| `handbook init` | `/smart-handbook:init` | 为项目建立 Handbook；从代码重建知识 | [init](workflows/init.md) |
+| `handbook work <task>` | `/smart-handbook:work <task>` | 解释审批流程；增加撤回；定位数据未生效；判断补偿能否重跑 | [work](workflows/work.md) |
+| `handbook update` | `/smart-handbook:update` | 根据代码变化更新 Handbook | [update](workflows/update.md) |
+| `handbook audit` | `/smart-handbook:audit` | 检查过期、覆盖与关键内容 | [audit](workflows/audit.md) |
+| `handbook status` | `/smart-handbook:status` | 查看已记录状态 | [status](workflows/status.md) |
 
 ## 首次使用
 
@@ -51,7 +51,7 @@ handbook status
 
 `handbook init [目标仓库、版本或范围]` 建立 Handbook；重建已有知识需要明确说明。省略参数时，以当前项目的 worktree 为目标，包含未提交修改。
 
-读取范围内的实现，写入 `.smart_handbook/` 的页面和状态。首次建立先完成导航及关键模块，跨模块流程按实际需要编写。结果说明生成页面、已深入阅读的范围、未检查范围和验证结果。
+读取范围内的实现，写入 `.smart-handbook/` 的页面和状态。首次建立先完成导航及关键模块，跨模块流程按实际需要编写。结果说明生成页面、已深入阅读的范围、未检查范围和验证结果。
 
 示例：`handbook init 先建立全库导航，再深入审批模块`。详细流程见 [init](workflows/init.md)。
 
@@ -81,7 +81,7 @@ handbook status
 
 ### status
 
-`handbook status [目标仓库]` 查看已有记录。省略参数时读取当前项目的 `.smart_handbook/`。
+`handbook status [目标仓库]` 查看已有记录。省略参数时读取当前项目的 `.smart-handbook/`。
 
 只读取已有页面和状态，不扫描源码，不计算指纹，不运行脚本或测试，不写入文件。结果列出内容覆盖、来源状态、复核和行为验证的记录及时间；未知项显示 unknown。无 Handbook 时报告尚未建立；状态不可用时报告原因，不自动修复。
 
@@ -95,7 +95,7 @@ handbook status
 
 ## 参数解析
 
-专用命令固定路由，命令后的文本作为参数。通用 Claude Code 入口 `/smart_handbook:smart_handbook <command> <task>` 将首个词与 help、init、work、update、audit、status 精确匹配；匹配时路由，余下文本作为参数，否则将全部文本作为 work 任务。
+专用命令固定路由，命令后的文本作为参数。通用 Claude Code 入口 `/smart-handbook:smart-handbook <command> <task>` 将首个词与 help、init、work、update、audit、status 精确匹配；匹配时路由，余下文本作为参数，否则将全部文本作为 work 任务。
 
 `handbook` 和通用入口无参数时进入 help。work 缺少任务时展示该命令的用法和任务示例，等待任务描述。明显的命令拼写错误显示有效命令，避免被当作开发任务。
 
@@ -103,7 +103,7 @@ handbook status
 
 自然语言按任务意图路由，模糊请求默认 work，内部识别 understand、development、debugging、maintenance。
 
-项目没有 `.smart_handbook/` 时，普通开发、排障或解释请求按原任务处理；建立和重建需要明确请求。
+项目没有 `.smart-handbook/` 时，普通开发、排障或解释请求按原任务处理；建立和重建需要明确请求。
 
 - “更新这个接口”进入 development；“更新 Handbook”进入 update。
 - “这个模块有没有过期”先局部核对；全库过期和覆盖检查进入 audit。
@@ -111,4 +111,4 @@ handbook status
 
 仓库、目标版本或任务范围缺失且会影响结果时，补充必要信息；可独立进行的源码定位继续完成。用户只要求解释或方案时，保持该范围。
 
-安装入口见 [Claude Code](claude-code.md) 与 [Codex](codex.md)。知识目录固定为目标项目根目录的 `.smart_handbook/`，CLI 参数见[格式契约](schema.md)。
+安装入口见 [Claude Code](claude-code.md) 与 [Codex](codex.md)。知识目录固定为目标项目根目录的 `.smart-handbook/`，CLI 参数见[格式契约](schema.md)。

@@ -20,8 +20,8 @@ class HandbookTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
-        (self.root / ".smart_handbook/modules").mkdir(parents=True)
-        (self.root / ".smart_handbook/flows").mkdir()
+        (self.root / ".smart-handbook/modules").mkdir(parents=True)
+        (self.root / ".smart-handbook/flows").mkdir()
         (self.root / "src").mkdir()
         (self.root / "config").mkdir()
         self.source = "src/ApprovalService.java"
@@ -30,20 +30,20 @@ class HandbookTest(unittest.TestCase):
         for source in (SKILL / "assets/handbook").glob("*-template.md"):
             stem = source.name.replace("-template", "")
             if stem == "module.md":
-                dest = self.root / ".smart_handbook/modules/approval.md"
+                dest = self.root / ".smart-handbook/modules/approval.md"
             elif stem == "flow.md":
-                dest = self.root / ".smart_handbook/flows/approval.md"
+                dest = self.root / ".smart-handbook/flows/approval.md"
             else:
-                dest = self.root / ".smart_handbook" / stem
+                dest = self.root / ".smart-handbook" / stem
             dest.write_text(source.read_text())
-        self.module = ".smart_handbook/modules/approval.md"
-        self.flow = ".smart_handbook/flows/approval.md"
+        self.module = ".smart-handbook/modules/approval.md"
+        self.flow = ".smart-handbook/flows/approval.md"
         self.change_meta(self.module, id="module-approval", coverage="documented",
                          source_ranges=["src"], config_ranges=["config"], claims=[{
                              "id": "approval-01", "section": "当前行为与关键约束",
                              "sources": [{"path": self.source, "symbol": "ApprovalService#approve(String)"}]}])
         self.change_meta(self.flow, id="flow-approval", modules=["module-approval"])
-        self.change_meta(".smart_handbook/map.md", modules=[{
+        self.change_meta(".smart-handbook/map.md", modules=[{
             "id": "module-approval", "page": self.module, "keywords": ["审批", "数据未生效"],
             "source_ranges": ["src"], "config_ranges": ["config"]}])
         self.state = {"schema_version": 1, "pages": {self.module: {
@@ -61,7 +61,7 @@ class HandbookTest(unittest.TestCase):
         path.write_text(text[:match.start()] + "<!-- handbook-meta\n" + json.dumps(meta, ensure_ascii=False, indent=2) + "\n-->" + text[match.end():])
 
     def save_state(self):
-        (self.root / ".smart_handbook/.state.json").write_text(json.dumps(self.state))
+        (self.root / ".smart-handbook/.state.json").write_text(json.dumps(self.state))
 
     def check(self):
         return hb.Handbook(self.root).check()
@@ -79,26 +79,35 @@ class HandbookTest(unittest.TestCase):
         return self.run_git("rev-parse", "HEAD")
 
     def test_clean_fixture_and_no_state_mutation(self):
-        before = (self.root / ".smart_handbook/.state.json").read_bytes()
+        before = (self.root / ".smart-handbook/.state.json").read_bytes()
         result = self.check()
         self.assertFalse(result["issues"], result["issues"])
         page = result["pages"][self.module]
         self.assertEqual(page["source_state"], "unchanged")
         self.assertEqual(page["review"], "reviewed_by_ai")
         self.assertEqual(page["recorded_verification"]["status"], "not-run")
-        self.assertEqual(before, (self.root / ".smart_handbook/.state.json").read_bytes())
+        self.assertEqual(before, (self.root / ".smart-handbook/.state.json").read_bytes())
 
     def test_hidden_directory_is_required_no_legacy_fallback(self):
-        (self.root / ".smart_handbook").rename(self.root / "handbook")
-        result = self.check()
-        self.assertIn("handbook-missing", self.codes(result))
-        self.assertEqual(result["pages"], {})
+        for old_name in ("handbook", ".smart_handbook"):
+            with self.subTest(directory=old_name):
+                directory = self.root / ".smart-handbook"
+                old = self.root / old_name
+                directory.rename(old)
+                try:
+                    result = self.check()
+                    self.assertIn("handbook-missing", self.codes(result))
+                    self.assertEqual(result["pages"], {})
+                finally:
+                    old.rename(directory)
 
     def test_legacy_state_page_path_is_rejected(self):
         record = self.state["pages"].pop(self.module)
-        self.state["pages"]["handbook/modules/approval.md"] = record
-        self.save_state()
-        self.assertIn("state-invalid", self.codes(self.check()))
+        for old_path in ("handbook/modules/approval.md", ".smart_handbook/modules/approval.md"):
+            with self.subTest(path=old_path):
+                self.state["pages"] = {old_path: record}
+                self.save_state()
+                self.assertIn("state-invalid", self.codes(self.check()))
 
     def test_behavior_change_with_same_symbol_requires_review(self):
         with (self.root / self.source).open("a") as file:
@@ -118,13 +127,13 @@ class HandbookTest(unittest.TestCase):
         self.assertIn("source-broken", self.codes(self.check()))
 
     def test_missing_baseline_is_not_unchanged(self):
-        (self.root / ".smart_handbook/.state.json").unlink()
+        (self.root / ".smart-handbook/.state.json").unlink()
         result = self.check()
         self.assertEqual(result["pages"][self.module]["source_state"], "baseline-unavailable")
 
     def test_damaged_state_preserves_markdown(self):
         before = (self.root / self.module).read_bytes()
-        (self.root / ".smart_handbook/.state.json").write_text("{oops")
+        (self.root / ".smart-handbook/.state.json").write_text("{oops")
         self.assertIn("state-invalid", self.codes(self.check()))
         self.assertEqual(before, (self.root / self.module).read_bytes())
 
@@ -192,7 +201,7 @@ class HandbookTest(unittest.TestCase):
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_map_missing_module(self):
-        self.change_meta(".smart_handbook/map.md", modules=[])
+        self.change_meta(".smart-handbook/map.md", modules=[])
         self.assertIn("map-module-missing", self.codes(self.check()))
 
     def test_map_scope_mismatch(self):
@@ -286,7 +295,7 @@ class HandbookTest(unittest.TestCase):
         self.assertEqual(result["related_flows"], [{"id": "flow-approval", "page": self.flow}])
 
     def test_no_git_no_baseline(self):
-        (self.root / ".smart_handbook/.state.json").unlink()
+        (self.root / ".smart-handbook/.state.json").unlink()
         result = hb.impact(hb.Handbook(self.root))
         self.assertEqual(result["baseline_status"], "baseline-unavailable")
         self.assertEqual(result["changed_files"], [])
@@ -316,7 +325,7 @@ class HandbookTest(unittest.TestCase):
         base = self.git_baseline()
         path = self.root / self.module
         path.write_text(path.read_text() + "\n知识更新\n")
-        (self.root / ".smart_handbook/extra.md").write_text("new knowledge file")
+        (self.root / ".smart-handbook/extra.md").write_text("new knowledge file")
         result = hb.impact(hb.Handbook(self.root), base)
         self.assertEqual(result["changed_files"], [])
         self.assertEqual(result["unowned_changes"], [])

@@ -13,7 +13,7 @@ from urllib.parse import unquote, urlsplit
 
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
-HANDBOOK_DIR = ".smart_handbook"
+HANDBOOK_DIR = ".smart-handbook"
 STATE_PATH = HANDBOOK_DIR + "/.state.json"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 META_RE = re.compile(r"<!--\s*handbook-meta\b([\s\S]*?)-->")

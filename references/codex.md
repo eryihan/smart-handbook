@@ -3,15 +3,15 @@
 ## 安装
 
 ```sh
-codex plugin marketplace add eryihan/smart_handbook
-codex plugin add smart_handbook@smart-handbook
+codex plugin marketplace add eryihan/smart-handbook
+codex plugin add smart-handbook@smart-handbook
 ```
 
 安装后在目标项目中新开会话。
 
 ## 使用
 
-在 Codex 会话中输入普通文本命令，或直接描述任务。需要明确调用 Skill 时，在 CLI 或 IDE 扩展中输入 `$smart_handbook help`，也可通过 `/skills` 选择：
+在 Codex 会话中输入普通文本命令，或直接描述任务。需要明确调用 Skill 时，在 CLI 或 IDE 扩展中输入 `$smart-handbook help`，也可通过 `/skills` 选择：
 
 ```text
 handbook help
@@ -23,7 +23,7 @@ handbook audit
 handbook status
 ```
 
-参数和路由规则见[命令说明](commands.md)。项目知识位于目标项目根目录的 `.smart_handbook/`。
+参数和路由规则见[命令说明](commands.md)。项目知识位于目标项目根目录的 `.smart-handbook/`。
 
 ## 本地开发
 
@@ -31,7 +31,7 @@ handbook status
 
 ```sh
 codex plugin marketplace add <repo-directory>
-codex plugin add smart_handbook@smart-handbook
+codex plugin add smart-handbook@smart-handbook
 ```
 
 查看 marketplace 中可用的插件：

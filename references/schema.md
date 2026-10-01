@@ -10,10 +10,10 @@
 
 ## 页面与目录
 
-项目知识位于目标仓库根目录的 `.smart_handbook/`：
+项目知识位于目标仓库根目录的 `.smart-handbook/`：
 
 ```text
-.smart_handbook/
+.smart-handbook/
 ├── README.md
 ├── system.md
 ├── map.md
@@ -88,9 +88,9 @@ V1 的 symbol 检查限于 Java 类型名和 `Type#method(SimpleType, int)`。�
 
 ## 状态文件
 
-格式定义见 [state-schema.json](../assets/state-schema.json)。`.smart_handbook/.state.json` 保存可重建的机器记录，业务结论保留在 Markdown。
+格式定义见 [state-schema.json](../assets/state-schema.json)。`.smart-handbook/.state.json` 保存可重建的机器记录，业务结论保留在 Markdown。
 
-`schema_version` 和 `pages` 必填。`pages` 的 key 使用 `.smart_handbook/...md`；每项必填 `sources`，将仓库相对文件路径映射到原始字节的 `sha256:<64 lowercase hex>`。可选的 `baseline.commit` 作为默认 Git 比较基线。
+`schema_version` 和 `pages` 必填。`pages` 的 key 使用 `.smart-handbook/...md`；每项必填 `sources`，将仓库相对文件路径映射到原始字节的 `sha256:<64 lowercase hex>`。可选的 `baseline.commit` 作为默认 Git 比较基线。
 
 以下示例表示尚未建立来源指纹：
 
@@ -98,7 +98,7 @@ V1 的 symbol 检查限于 Java 类型名和 `Type#method(SimpleType, int)`。�
 {
   "schema_version": 1,
   "pages": {
-    ".smart_handbook/modules/approval.md": {
+    ".smart-handbook/modules/approval.md": {
       "sources": {},
       "source_state": "baseline-unavailable",
       "review": {"status": "needs_review"},
@@ -170,7 +170,7 @@ impact 输出 `changed_files`、`renames`、`direct_claims`、`previous_pages`�
 
 Git 根目录必须等于 `--root`。关联 metadata 始终读取当前 worktree 的 Handbook；比较历史目标时需先确认这些关联适用。
 
-改名保留旧、新路径，删除 claim 或页面后仍可通过旧状态的 `previous_pages` 找到候选。`.smart_handbook/` 自身的修改不列入实现变更。
+改名保留旧、新路径，删除 claim 或页面后仍可通过旧状态的 `previous_pages` 找到候选。`.smart-handbook/` 自身的修改不列入实现变更。
 
 指纹降级无法发现新增文件、未引用文件、完整改名关系和间接依赖变化。工具不生成全库入口清单或自动依赖图。
 

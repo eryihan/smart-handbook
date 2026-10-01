@@ -4,7 +4,7 @@
 
 识别 understand、development、debugging 或 maintenance，确认仓库、目标代码版本、worktree 和执行范围。
 
-从目标项目 `.smart_handbook/` 的 README、map 定位相关 module / flow，比较已记录来源指纹，读取任务相关源码、SQL、配置、构建定义和必要测试。小范围任务按相关文件核对；无需先执行全库 audit。
+从目标项目 `.smart-handbook/` 的 README、map 定位相关 module / flow，比较已记录来源指纹，读取任务相关源码、SQL、配置、构建定义和必要测试。小范围任务按相关文件核对；无需先执行全库 audit。
 
 页面缺失时直接读代码，引用失效时重新定位，文档与代码冲突时按目标版本实现判断。当前源码不能直接代表线上版本；已引用文件未变也不能排除间接依赖变化。
 

@@ -6,7 +6,7 @@
 
 ## 识别与复核
 
-1. 读取 `.smart_handbook/.state.json` 和现有 metadata，保留旧来源关联。确认基线、目标 commit / worktree，以及未提交修改是否在比较范围内。
+1. 读取 `.smart-handbook/.state.json` 和现有 metadata，保留旧来源关联。确认基线、目标 commit / worktree，以及未提交修改是否在比较范围内。
 2. 运行 `impact`，查看变更文件、直接 claim、旧页面关联、相关 module / flow 和未归属变化。
 3. 阅读候选项的实际代码与 diff。公共组件、共享配置或未归属变更可能影响其他调用方和流程，按实现关系扩大阅读范围。
 4. 为每个候选项记录有源码依据的处置：无影响、定位变化、行为变化、新增知识、删除知识、需要扩大分析范围。
