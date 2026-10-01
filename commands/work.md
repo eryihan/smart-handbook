@@ -10,4 +10,4 @@ disable-model-invocation: true
 
 $ARGUMENTS
 
-无参数时要求补充具体任务。
+无参数时展示 work 的用法和任务示例，等待任务描述。
