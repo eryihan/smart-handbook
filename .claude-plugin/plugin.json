@@ -1,0 +1,8 @@
+{
+  "name": "smart_handbook",
+  "version": "0.1.0",
+  "description": "Build, use, update, audit, and inspect source-backed project knowledge in .smart_handbook/.",
+  "author": {"name": "eryihan"},
+  "repository": "https://github.com/eryihan/smart_handbook",
+  "skills": ["./"]
+}
