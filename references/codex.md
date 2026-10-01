@@ -11,7 +11,7 @@ codex plugin add smart_handbook@smart-handbook
 
 ## 使用
 
-使用普通文本或直接描述任务：
+在 Codex 会话中输入普通文本命令，或直接描述任务。需要明确调用 Skill 时，在 CLI 或 IDE 扩展中输入 `$smart_handbook help`，也可通过 `/skills` 选择：
 
 ```text
 handbook help
