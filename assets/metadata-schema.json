@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Code Handbook page metadata V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "kind", "coverage", "claims"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {"$ref": "#/$defs/id"},
+    "kind": {"enum": ["readme", "system", "map", "working-guide", "module", "flow"]},
+    "coverage": {"enum": ["navigation-only", "documented", "known-gap"]},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "section", "sources"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "section": {"type": "string", "minLength": 1},
+          "sources": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["path"],
+              "properties": {
+                "path": {"$ref": "#/$defs/path"},
+                "symbol": {"type": "string", "minLength": 1},
+                "line": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        }
+      }
+    },
+    "source_ranges": {"$ref": "#/$defs/ranges"},
+    "config_ranges": {"$ref": "#/$defs/ranges"},
+    "modules": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/id"},
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "page", "source_ranges", "config_ranges", "keywords"],
+            "properties": {
+              "id": {"$ref": "#/$defs/id"},
+              "page": {"$ref": "#/$defs/path"},
+              "source_ranges": {"$ref": "#/$defs/ranges"},
+              "config_ranges": {"$ref": "#/$defs/ranges"},
+              "keywords": {"type": "array", "items": {"type": "string", "minLength": 1}}
+            }
+          }
+        ]
+      }
+    },
+    "unowned_entries": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "module"}}}, "then": {"required": ["source_ranges", "config_ranges"]}},
+    {"if": {"properties": {"kind": {"const": "flow"}}}, "then": {"required": ["modules"], "properties": {"modules": {"items": {"$ref": "#/$defs/id"}}}}},
+    {"if": {"properties": {"kind": {"const": "map"}}}, "then": {"required": ["modules", "unowned_entries"], "properties": {"modules": {"items": {"type": "object"}}}}}
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "path": {"type": "string", "minLength": 1},
+    "ranges": {"type": "array", "items": {"$ref": "#/$defs/path"}}
+  }
+}
