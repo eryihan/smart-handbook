@@ -24,11 +24,14 @@ codex plugin add smart_handbook@smart-handbook
 
 | 普通文本命令 | Claude Code slash command | 用途 |
 |---|---|---|
+| `handbook help [command]` | `/smart_handbook:help [command]` | 查看全部用法或指定命令的帮助 |
 | `handbook init` | `/smart_handbook:init` | 建立或重建 Handbook |
 | `handbook work <任务>` | `/smart_handbook:work <任务>` | 理解、开发、排障或维护 |
 | `handbook update` | `/smart_handbook:update` | 根据代码变化复核并更新相关页面 |
 | `handbook audit` | `/smart_handbook:audit` | 重新检查结构、来源、导航覆盖和关键内容 |
 | `handbook status` | `/smart_handbook:status` | 查看已记录的覆盖、复核、验证和缺口 |
+
+首次使用可执行 `handbook help`；查看单个命令的用法，例如 `handbook help update`。Claude Code 对应使用 `/smart_handbook:help` 和 `/smart_handbook:help update`。
 
 项目已有 `.smart_handbook/` 时，也可直接描述任务，例如“审批结束了，但数据没有生效，帮我定位原因”。Skill 会进入对应工作流。参数和自然语言路由见[命令说明](references/commands.md)。
 

@@ -14,6 +14,8 @@ codex plugin add smart_handbook@smart-handbook
 使用普通文本或直接描述任务：
 
 ```text
+handbook help
+handbook help update
 handbook init
 handbook work 审批结束了，但数据没有生效，帮我定位原因
 handbook update

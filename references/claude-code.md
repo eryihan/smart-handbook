@@ -21,6 +21,8 @@ claude plugin install smart_handbook@smart-handbook
 ## 使用
 
 ```text
+/smart_handbook:help
+/smart_handbook:help update
 /smart_handbook:init
 /smart_handbook:work <任务>
 /smart_handbook:update
@@ -28,9 +30,9 @@ claude plugin install smart_handbook@smart-handbook
 /smart_handbook:status
 ```
 
-命令后的文本作为任务或范围。`work` 需要任务描述；其他命令无参数时处理当前目标仓库。
+help 展示用法，也可指定一个命令名。工作命令后的文本作为任务或范围。`work` 需要任务描述，无参数时展示用法；其余工作命令无参数时处理当前目标仓库。
 
-五个 slash command 用于手动调用；自然语言由核心 Skill 识别并路由。
+六个 slash command 用于手动调用；自然语言由核心 Skill 识别并路由。
 
 通用入口为 `/smart_handbook:smart_handbook <command> <task>`。也支持普通文本 `handbook <command>` 和自然语言，解析规则见[命令说明](commands.md)。
 
@@ -60,6 +62,6 @@ claude plugin validate .claude-plugin/plugin.json
 claude plugin validate .claude-plugin/marketplace.json
 ```
 
-`.claude-plugin/plugin.json` 的 `skills: ["./"]` 加载根目录 Skill；`commands/` 提供五个命令入口，通过 `${CLAUDE_PLUGIN_ROOT}` 读取资源。目标项目知识写入该项目的 `.smart_handbook/`，脚本的 `--root` 指向目标项目。
+`.claude-plugin/plugin.json` 的 `skills: ["./"]` 加载根目录 Skill；`commands/` 提供六个命令入口，通过 `${CLAUDE_PLUGIN_ROOT}` 读取资源。目标项目知识写入该项目的 `.smart_handbook/`，脚本的 `--root` 指向目标项目。
 
 分发格式见 Claude Code 官方的[插件参考](https://code.claude.com/docs/en/plugins-reference)与[marketplace 文档](https://code.claude.com/docs/en/plugin-marketplaces)。
