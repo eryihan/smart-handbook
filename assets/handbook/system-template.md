@@ -2,7 +2,7 @@
 
 <!-- handbook-meta
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "handbook-system",
   "kind": "system",
   "coverage": "known-gap",

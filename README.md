@@ -46,7 +46,7 @@ codex plugin add smart-handbook@smart-handbook
 2. 为当前项目建立知识：输入 `/smart-handbook:init` 或 `handbook init`。Agent 先发现文件、入口和业务归属，再分批编写业务手册，完成源码复核与独立阅读验收。默认目标是约定范围内的全量存量业务，中断保存进度，再次 init 继续未完成项。只做导航或局部范围时明确指定。
 3. 从目标项目 `.smart-handbook/README.md` 找到业务手册，阅读规则、数据变化、生效与失败边界，再按引用定位代码。
 
-后续代码变化或发现手册问题时使用 update 修订；audit 只检查并报告问题。已有进度从目标项目 README 的“覆盖状态与缺口”查看，详细记录保存在清单与状态文件中。
+后续代码变化或发现手册问题时使用 update 修订；audit 只检查并报告问题。已有手册时，init 先只读核对记录是否有效，再判断续跑或复用。进度从目标项目 README 的“覆盖状态与缺口”查看。
 
 ## 命令
 
@@ -62,11 +62,14 @@ codex plugin add smart-handbook@smart-handbook
 ├── working-guide.md          本项目手册的阅读与代码定位说明
 ├── modules/<module>.md       单模块行为与约束
 ├── flows/<flow>.md           跨模块交接与失败处理
-├── .inventory.json           Agent 的发现、业务归属和分析进度
-└── .state.json               来源指纹、复核与验证记录
+├── .inventory.json           Agent 的发现、业务归属和逐入口进度
+├── .reviews/<业务ID>.json     源码场景、阅读答案及逐题验收证据
+└── .state.json               来源指纹、比较基线和运行验证记录
 ```
 
-页面中的 claim 将关键结论关联到实现文件和可选 symbol。`.state.json` 保存文件指纹及复核记录；代码变化后，`update` 先定位候选页面，再读取实现并局部修改。
+页面中的 claim 将关键结论关联到实现、SQL、配置或异步交接代码，并标明资源类型和证据角色。入口进度引用实际验收记录，模块与全量进度从有效记录汇总；文件已归属或页面已创建不代表业务已分析。
+
+代码或手册变化后，旧验收进入待复核，update 根据差异修订并复验。当前格式版本为 2，不兼容旧格式；旧产物需通过 init 重新建立，不自动迁移。
 
 业务内容与证据要求见[接口分析与内容验收](references/endpoint-analysis.md)，全量发现和进度见[清单标准](references/project-inventory.md)，独立读者能否理解业务由[阅读验收](references/reading-review.md)核对。
 
@@ -81,7 +84,7 @@ python3 scripts/handbook.py check --root /path/to/project
 python3 scripts/handbook.py impact --root /path/to/project --base <commit>
 ```
 
-`check` 检查页面结构、引用和已记录来源的变化。`impact` 根据 diff 或历史指纹输出候选影响范围。两者均只读，语义复核和状态保存由 Agent 完成。参数、退出码及降级范围见[工具契约](references/schema.md#python-cli)。
+`check` 检查结构、引用、证据角色、验收记录和指纹变化，派生当前进度。`impact` 根据 diff 或历史指纹输出受影响入口，也列出手册变化导致的待复验项。两者均只读；业务发现是否完整、答案是否正确仍由 Agent 对照源码和独立阅读核对。参数、退出码及降级范围见[工具契约](references/schema.md#python-cli)。
 
 ## 开发
 

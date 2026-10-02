@@ -2,7 +2,7 @@
 
 <!-- handbook-meta
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "handbook-map",
   "kind": "map",
   "coverage": "navigation-only",
