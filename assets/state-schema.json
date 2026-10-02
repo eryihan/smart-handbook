@@ -1,45 +1,88 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Code Handbook rebuildable state V1",
+  "title": "Code Handbook rebuildable state V2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "pages"],
+  "required": [
+    "schema_version",
+    "pages"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {
+      "const": 2
+    },
     "baseline": {
-      "type": "object", "additionalProperties": false,
-      "required": ["commit"],
-      "properties": {"commit": {"type": "string", "minLength": 1}}
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "pages": {
       "type": "object",
       "additionalProperties": {
-        "type": "object", "additionalProperties": false,
-        "required": ["sources"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sources"
+        ],
         "properties": {
           "sources": {
             "type": "object",
-            "additionalProperties": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
           },
-          "source_state": {"enum": ["unchanged", "changed", "broken", "unknown", "baseline-unavailable"]},
-          "source_checked_at": {"type": "string", "format": "date-time"},
-          "review": {
-            "type": "object", "additionalProperties": false,
-            "required": ["status"],
-            "properties": {
-              "status": {"enum": ["reviewed_by_ai", "needs_review"]},
-              "reviewed_at": {"type": "string", "format": "date-time"}
-            },
-            "allOf": [{"if": {"properties": {"status": {"const": "reviewed_by_ai"}}}, "then": {"required": ["reviewed_at"]}}]
+          "source_state": {
+            "enum": [
+              "unchanged",
+              "changed",
+              "broken",
+              "unknown",
+              "baseline-unavailable"
+            ]
+          },
+          "source_checked_at": {
+            "type": "string",
+            "format": "date-time"
           },
           "verification": {
-            "type": "object", "additionalProperties": false,
-            "required": ["status", "conditions", "method", "observed"],
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "conditions",
+              "method",
+              "observed"
+            ],
             "properties": {
-              "status": {"enum": ["verified", "failed", "not-run", "unavailable"]},
-              "conditions": {"type": "string", "minLength": 1},
-              "method": {"type": "string", "minLength": 1},
-              "observed": {"type": "string", "minLength": 1}
+              "status": {
+                "enum": [
+                  "verified",
+                  "failed",
+                  "not-run",
+                  "unavailable"
+                ]
+              },
+              "conditions": {
+                "type": "string",
+                "minLength": 1
+              },
+              "method": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observed": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }

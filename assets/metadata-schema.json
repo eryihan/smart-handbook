@@ -1,69 +1,244 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Code Handbook page metadata V1",
+  "title": "Code Handbook page metadata V2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "kind", "coverage", "claims"],
+  "required": [
+    "schema_version",
+    "id",
+    "kind",
+    "coverage",
+    "claims"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "id": {"$ref": "#/$defs/id"},
-    "kind": {"enum": ["readme", "system", "map", "working-guide", "module", "flow"]},
-    "coverage": {"enum": ["navigation-only", "documented", "known-gap"]},
+    "schema_version": {
+      "const": 2
+    },
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "kind": {
+      "enum": [
+        "readme",
+        "system",
+        "map",
+        "working-guide",
+        "module",
+        "flow"
+      ]
+    },
+    "coverage": {
+      "enum": [
+        "navigation-only",
+        "documented",
+        "known-gap"
+      ]
+    },
     "claims": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "section", "sources"],
+        "required": [
+          "id",
+          "section",
+          "sources",
+          "resource_types"
+        ],
         "properties": {
-          "id": {"$ref": "#/$defs/id"},
-          "section": {"type": "string", "minLength": 1},
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "section": {
+            "type": "string",
+            "minLength": 1
+          },
           "sources": {
-            "type": "array", "minItems": 1,
+            "type": "array",
+            "minItems": 1,
             "items": {
-              "type": "object", "additionalProperties": false,
-              "required": ["path"],
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "roles"
+              ],
               "properties": {
-                "path": {"$ref": "#/$defs/path"},
-                "symbol": {"type": "string", "minLength": 1},
-                "line": {"type": "integer", "minimum": 1}
+                "path": {
+                  "$ref": "#/$defs/path"
+                },
+                "symbol": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "roles": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "enum": [
+                      "implementation",
+                      "persistence",
+                      "configuration",
+                      "handoff",
+                      "definition"
+                    ]
+                  }
+                }
               }
+            }
+          },
+          "resource_types": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "database",
+                "redis",
+                "mq",
+                "es",
+                "rpc",
+                "http",
+                "async",
+                "other"
+              ]
             }
           }
         }
       }
     },
-    "source_ranges": {"$ref": "#/$defs/ranges"},
-    "config_ranges": {"$ref": "#/$defs/ranges"},
+    "source_ranges": {
+      "$ref": "#/$defs/ranges"
+    },
+    "config_ranges": {
+      "$ref": "#/$defs/ranges"
+    },
     "modules": {
       "type": "array",
       "items": {
         "oneOf": [
-          {"$ref": "#/$defs/id"},
           {
-            "type": "object", "additionalProperties": false,
-            "required": ["id", "page", "source_ranges", "config_ranges", "keywords"],
+            "$ref": "#/$defs/id"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "page",
+              "source_ranges",
+              "config_ranges",
+              "keywords"
+            ],
             "properties": {
-              "id": {"$ref": "#/$defs/id"},
-              "page": {"$ref": "#/$defs/path"},
-              "source_ranges": {"$ref": "#/$defs/ranges"},
-              "config_ranges": {"$ref": "#/$defs/ranges"},
-              "keywords": {"type": "array", "items": {"type": "string", "minLength": 1}}
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "page": {
+                "$ref": "#/$defs/path"
+              },
+              "source_ranges": {
+                "$ref": "#/$defs/ranges"
+              },
+              "config_ranges": {
+                "$ref": "#/$defs/ranges"
+              },
+              "keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           }
         ]
       }
     },
-    "unowned_entries": {"type": "array", "items": {"type": "string", "minLength": 1}}
+    "unowned_entries": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
   },
   "allOf": [
-    {"if": {"properties": {"kind": {"const": "module"}}}, "then": {"required": ["source_ranges", "config_ranges"]}},
-    {"if": {"properties": {"kind": {"const": "flow"}}}, "then": {"required": ["modules"], "properties": {"modules": {"items": {"$ref": "#/$defs/id"}}}}},
-    {"if": {"properties": {"kind": {"const": "map"}}}, "then": {"required": ["modules", "unowned_entries"], "properties": {"modules": {"items": {"type": "object"}}}}}
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "module"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "source_ranges",
+          "config_ranges"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "flow"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "modules"
+        ],
+        "properties": {
+          "modules": {
+            "items": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "map"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "modules",
+          "unowned_entries"
+        ],
+        "properties": {
+          "modules": {
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
   ],
   "$defs": {
-    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-    "path": {"type": "string", "minLength": 1},
-    "ranges": {"type": "array", "items": {"$ref": "#/$defs/path"}}
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ranges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/path"
+      }
+    }
   }
 }

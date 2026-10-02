@@ -46,14 +46,12 @@ class HandbookTest(unittest.TestCase):
         self.change_meta(".smart-handbook/map.md", modules=[{
             "id": "module-approval", "page": self.module, "keywords": ["审批", "数据未生效"],
             "source_ranges": ["src"], "config_ranges": ["config"]}])
-        self.state = {"schema_version": 1, "pages": {self.module: {
+        self.state = {"schema_version": 2, "pages": {self.module: {
             "sources": {self.source: hb.fingerprint(self.root / self.source)},
-            "review": {"status": "reviewed_by_ai", "reviewed_at": "2026-10-01T10:00:00Z"},
             "verification": {"status": "not-run", "conditions": "fixture only", "method": "none", "observed": "not executed"}}}}
         self.save_state()
-        pending_review = {"status": "pending", "reviewed_at": None, "scope": "fixture", "result": "not reviewed"}
         self.inventory = {
-            "schema_version": 1, "mode": "full", "status": "in-progress",
+            "schema_version": 2, "mode": "full", "status": "in-progress",
             "target": {"commit": None, "worktree": "fixture", "recorded_at": "2026-10-02T10:00:00+08:00"},
             "scope": {"include": ["src", "config"], "exclude": []},
             "discovery": {"checked": ["src", "config"], "methods": ["fixture declarations"], "remaining": []},
@@ -61,19 +59,267 @@ class HandbookTest(unittest.TestCase):
                        "role": "fixture implementation", "units": ["business-approval"],
                        "disposition": "assigned", "reason": ""}
                       for path in (self.source, "config/application.yml")],
-            "units": [{"id": "business-approval", "name": "审批", "status": "needs-review",
-                       "entrypoints": [{"path": self.source, "symbol": "ApprovalService#approve(String)",
-                                        "trigger": "fixture API"}],
-                       "pages": [self.module, self.flow], "sources": [self.source, "config/application.yml"],
-                       "depends_on": [], "gaps": [],
-                       "review": {"source": dict(pending_review), "reading": dict(pending_review)}}]}
+            "units": [{"id": "business-approval", "name": "审批",
+                       "entrypoints": [{"id": "approve", "path": self.source, "symbol": "ApprovalService#approve(String)",
+                                        "trigger": "fixture API", "status": "accepted", "claims": ["approval-01"],
+                                        "gaps": [], "reviews": [".smart-handbook/.reviews/approval.json"]}],
+                       "pages": [self.module, self.flow], "sources": [self.source],
+                       "depends_on": [], "gaps": []}]}
         self.save_inventory()
+        self.review_path = ".smart-handbook/.reviews/approval.json"
+        self.record = {
+            "schema_version": 2, "id": "review-approval", "target": {"commit": None, "worktree": "synthetic fixture"},
+            "sources": {self.source: hb.fingerprint(self.root / self.source)},
+            "pages": {self.module: hb.fingerprint(self.root / self.module)},
+            "source_reviewed_at": "2026-10-01T10:00:00Z",
+            "reader": {"isolation": "independent", "description": "synthetic record, no real AI reading"},
+            "scenarios": [{"id": "approve-normal", "entrypoints": ["approve"], "topics": ["normal"],
+                "question": "What does approve do?",
+                "expected": {"answer": "Returns without changes", "sources": [{"path": self.source, "symbol": "ApprovalService#approve(String)"}]},
+                "reading": {"status": "answered", "answer": "Returns without changes",
+                    "evidence": [{"page": self.module, "section": "当前行为与关键约束"}],
+                    "locations": [{"path": self.source, "symbol": "ApprovalService#approve(String)"}]},
+                "verdict": "passed", "assessment": "Synthetic fixture only", "reviewed_at": "2026-10-01T10:01:00Z"}],
+            "not_applicable": {"approve": {topic: {"reason": "The fixture method is empty", "sources": [{"path": self.source}]}
+                for topic in hb.REVIEW_TOPICS - {"normal"}}}}
+        self.save_review()
+
+    def save_review(self):
+        path = self.root / self.review_path
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(self.record))
+
+    def refresh_review_snapshots(self):
+        meta = json.loads(hb.META_RE.search((self.root / self.module).read_text())[1])
+        sources = {s["path"] for c in meta["claims"] for s in c["sources"]}
+        self.record["sources"] = {p: hb.fingerprint(self.root / p) for p in sources}
+        self.record["pages"][self.module] = hb.fingerprint(self.root / self.module)
+        self.save_review()
+
+    def test_class_inventory_cannot_certify_all_handlers(self):
+        self.inventory["units"][0]["entrypoints"][0]["symbol"] = "ApprovalService"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_accepted_entry_requires_an_existing_handler_location(self):
+        entry = self.inventory["units"][0]["entrypoints"][0]
+        entry["symbol"] = "ApprovalService#missing()"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        del entry["symbol"]
+        entry["line"] = 9999
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_review_locations_must_exist_in_unchanged_sources(self):
+        scenario = self.record["scenarios"][0]
+        scenario["reading"]["locations"] = [{"path": self.source, "symbol": "ApprovalService"}]
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        scenario["reading"]["locations"] = [{"path": self.source, "symbol": "ApprovalService#missing()"}]
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        scenario["reading"]["locations"] = [{"path": self.source, "line": 9999}]
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        scenario["reading"]["locations"] = [{"path": self.source, "line": 2}]
+        self.save_review()
+        self.assertNotIn("review-invalid", self.codes(self.check()))
+        scenario["reading"]["locations"] = [{"path": self.source, "line": 9999}]
+        self.save_review()
+        (self.root / self.source).write_text("// changed source\n")
+        result = self.check()
+        self.assertNotIn("review-invalid", self.codes(result))
+        self.assertIn("review-snapshot-changed", self.codes(result))
+
+    def test_full_completion_rejects_a_navigation_entry_on_documented_page(self):
+        unit = self.inventory["units"][0]
+        unit["entrypoints"].append({"id": "reject", "path": self.source, "symbol": "ApprovalService#reject()",
+            "trigger": "another API", "status": "pending", "claims": [], "gaps": [], "reviews": []})
+        self.inventory["status"] = "complete"
+        self.save_inventory()
+        result = self.check()
+        self.assertIn("inventory-invalid", self.codes(result))
+        self.assertEqual(result["pages"][self.module]["coverage"], "documented")
+
+    def test_unit_status_and_page_review_cannot_be_manually_duplicated(self):
+        self.inventory["units"][0]["status"] = "accepted"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        del self.inventory["units"][0]["status"]
+        self.save_inventory()
+        self.state["pages"][self.module]["review"] = {"status": "reviewed_by_ai", "reviewed_at": "2026-10-01T10:00:00Z"}
+        self.save_state()
+        self.assertIn("state-invalid", self.codes(self.check()))
+
+    def test_failed_reading_case_blocks_completion_even_after_page_repair(self):
+        failed = json.loads(json.dumps(self.record["scenarios"][0]))
+        failed.update(id="approve-missing-table", verdict="failed", assessment="Reader omitted a table")
+        self.record["scenarios"].append(failed)
+        self.save_review()
+        self.inventory["status"] = "complete"
+        self.save_inventory()
+        result = self.check()
+        self.assertIn("entry-review-incomplete", self.codes(result))
+        self.assertEqual(result["inventory"]["status"], "incomplete")
+        (self.root / self.module).write_text((self.root / self.module).read_text() + "\n补齐表名\n")
+        self.refresh_review_snapshots()
+        self.assertEqual(self.check()["inventory"]["status"], "incomplete")
+
+    def test_unavailable_or_unanswered_reading_cannot_pass(self):
+        for field, value in (("status", "unavailable"), ("answer", ""), ("evidence", []), ("locations", [])):
+            with self.subTest(field=field):
+                old = self.record["scenarios"][0]["reading"][field]
+                self.record["scenarios"][0]["reading"][field] = value
+                self.save_review()
+                self.assertIn("review-invalid", self.codes(self.check()))
+                self.record["scenarios"][0]["reading"][field] = old
+
+    def test_review_of_another_entry_does_not_certify_requested_entry(self):
+        self.record["scenarios"][0]["entrypoints"] = ["some-other-business"]
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        self.assertIn("entry-review-incomplete", self.codes(self.check()))
+
+    def test_review_topics_require_scenarios_or_source_backed_reasons(self):
+        del self.record["not_applicable"]["approve"]["repeat"]
+        self.save_review()
+        self.assertIn("entry-review-incomplete", self.codes(self.check()))
+        self.record["not_applicable"]["approve"]["repeat"] = {"reason": "No writes", "sources": []}
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+
+    def test_topic_cannot_be_both_tested_and_not_applicable(self):
+        self.record["not_applicable"]["approve"]["normal"] = {"reason": "No behavior", "sources": [{"path": self.source}]}
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+
+    def test_unknown_claim_duplicate_entry_and_missing_review_are_rejected(self):
+        entry = self.inventory["units"][0]["entrypoints"][0]
+        entry["claims"] = ["unknown-claim"]
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        entry["claims"] = ["approval-01"]
+        self.inventory["units"][0]["entrypoints"].append(dict(entry))
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        self.inventory["units"][0]["entrypoints"].pop()
+        self.save_inventory()
+        (self.root / self.review_path).unlink()
+        self.assertIn("review-invalid", self.codes(self.check()))
+
+    def test_future_and_reversed_review_times_are_rejected(self):
+        self.record["source_reviewed_at"] = "2999-01-01T10:00:00Z"
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        self.record["source_reviewed_at"] = "2026-10-01T10:02:00Z"
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        self.inventory["target"]["recorded_at"] = "2999-01-01T10:00:00Z"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_database_claim_requires_mapping_evidence(self):
+        source = {"path": self.source, "roles": ["implementation"]}
+        self.change_meta(self.module, claims=[{"id": "approval-01", "section": "当前行为与关键约束",
+            "resource_types": ["database"], "sources": [source]}])
+        self.assertIn("claim-evidence-incomplete", self.codes(self.check()))
+        source["roles"].append("persistence")  # SQL annotations may share the implementation file.
+        self.change_meta(self.module, claims=[{"id": "approval-01", "section": "当前行为与关键约束",
+            "resource_types": ["database"], "sources": [source]}])
+        self.refresh_review_snapshots()
+        self.assertFalse(self.check()["issues"])
+
+    def test_middleware_and_async_claims_require_config_and_receiver_evidence(self):
+        for kind, role in (("mq", "configuration"), ("redis", "configuration"), ("async", "handoff")):
+            with self.subTest(kind=kind):
+                source = {"path": self.source, "roles": ["implementation"]}
+                self.change_meta(self.module, claims=[{"id": "approval-01", "section": "当前行为与关键约束",
+                    "resource_types": [kind], "sources": [source]}])
+                self.assertIn("claim-evidence-incomplete", self.codes(self.check()))
+                source["roles"].append(role)
+                self.change_meta(self.module, claims=[{"id": "approval-01", "section": "当前行为与关键约束",
+                    "resource_types": [kind], "sources": [source]}])
+                self.refresh_review_snapshots()
+                self.assertFalse(self.check()["issues"])
+
+    def test_review_source_and_page_changes_invalidate_recorded_completion(self):
+        self.inventory["status"] = "complete"
+        self.save_inventory()
+        for rel in (self.source, self.module):
+            with self.subTest(path=rel):
+                path = self.root / rel
+                old = path.read_bytes()
+                path.write_bytes(old + b"\nchanged\n")
+                result = self.check()
+                self.assertIn("review-snapshot-changed", self.codes(result))
+                self.assertEqual(result["inventory"]["entries"]["approve"]["status"], "needs-review")
+                self.assertEqual(result["inventory"]["status"], "incomplete")
+                path.write_bytes(old)
+
+    def test_advancing_baseline_cannot_overwrite_old_review_proof(self):
+        (self.root / self.source).write_text("class ApprovalService { public void approve(String request) { throw new RuntimeException(); } }\n")
+        self.inventory["files"][0]["fingerprint"] = hb.fingerprint(self.root / self.source)
+        self.state["pages"][self.module]["sources"][self.source] = hb.fingerprint(self.root / self.source)
+        self.save_inventory()
+        self.save_state()
+        result = self.check()
+        self.assertEqual(result["pages"][self.module]["source_state"], "unchanged")
+        self.assertEqual(result["pages"][self.module]["review"], "needs_review")
+        self.assertIn("review-snapshot-changed", self.codes(result))
+
+    def test_handbook_only_edit_is_a_review_candidate_without_code_diff(self):
+        (self.root / self.module).write_text((self.root / self.module).read_text() + "\n状态改为立即生效\n")
+        result = hb.impact(hb.Handbook(self.root))
+        self.assertEqual(result["changed_files"], [])
+        self.assertEqual(result["review_candidates"], [{"id": "approve", "reviews": [self.review_path]}])
+
+    def test_shared_unit_is_certified_only_by_linked_entry_evidence(self):
+        shared = {"id": "shared-rule", "name": "公共规则", "entrypoints": [], "pages": [self.module],
+                  "sources": [self.source], "depends_on": [], "gaps": []}
+        self.inventory["units"].append(shared)
+        self.inventory["files"][0]["units"].append("shared-rule")
+        self.inventory["status"] = "complete"
+        self.save_inventory()
+        self.assertEqual(self.check()["inventory"]["units"]["shared-rule"]["status"], "accepted")
+        shared["sources"] = ["config/application.yml"]
+        self.inventory["files"][1]["units"].append("shared-rule")
+        self.save_inventory()
+        result = self.check()
+        self.assertIn("inventory-completion-conflict", self.codes(result))
+        self.assertEqual(result["inventory"]["status"], "incomplete")
+
+    def test_review_paths_and_expected_answers_cannot_escape_repository(self):
+        self.inventory["units"][0]["entrypoints"][0]["reviews"] = ["../outside.json"]
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        self.inventory["units"][0]["entrypoints"][0]["reviews"] = [self.review_path]
+        self.save_inventory()
+        self.record["scenarios"][0]["expected"]["sources"] = [{"path": "../outside.java"}]
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+
+    def test_full_completion_preserves_unresolved_local_gap(self):
+        self.inventory["units"][0]["gaps"] = ["local receiver has not been traced"]
+        self.inventory["status"] = "complete"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_v1_inventory_is_rejected_without_migration(self):
+        self.inventory["schema_version"] = 1
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
 
     def change_meta(self, rel, **updates):
         path = self.root / rel
         text = path.read_text()
         match = hb.META_RE.search(text)
         meta = json.loads(match[1])
+        if "claims" in updates:
+            for claim in updates["claims"]:
+                claim.setdefault("resource_types", [])
+                for source in claim["sources"]:
+                    source.setdefault("roles", ["implementation"])
         meta.update(updates)
         path.write_text(text[:match.start()] + "<!-- handbook-meta\n" + json.dumps(meta, ensure_ascii=False, indent=2) + "\n-->" + text[match.end():])
 
@@ -93,19 +339,19 @@ class HandbookTest(unittest.TestCase):
         self.assertEqual(path.read_text(), "{broken")
         self.assertEqual((self.root / self.module).read_bytes(), before)
 
-    def test_inventory_completion_requires_both_reviews(self):
+    def test_inventory_completion_requires_entry_reviews(self):
         self.inventory["status"] = "complete"
+        entry = self.inventory["units"][0]["entrypoints"][0]
+        entry["status"] = "needs-review"
         self.save_inventory()
         self.assertIn("inventory-invalid", self.codes(self.check()))
-        unit = self.inventory["units"][0]
-        unit["status"] = "accepted"
-        for review in unit["review"].values():
-            review.update(status="passed", reviewed_at="2026-10-02T10:00:00+08:00", result="synthetic fixture only")
+        entry["status"] = "accepted"
         self.save_inventory()
         self.assertFalse(self.check()["issues"])
-        unit["review"]["reading"]["status"] = "unavailable"
-        self.save_inventory()
-        self.assertIn("inventory-invalid", self.codes(self.check()))
+        self.record["reader"]["isolation"] = "unavailable"
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+        self.assertEqual(self.check()["inventory"]["status"], "incomplete")
 
     def test_inventory_rejects_pending_discovery_and_unknown_owners(self):
         self.inventory["mode"] = "navigation"
@@ -157,9 +403,6 @@ class HandbookTest(unittest.TestCase):
 
     def test_completed_inventory_becomes_incomplete_when_source_changes(self):
         self.inventory["status"] = "complete"
-        self.inventory["units"][0]["status"] = "accepted"
-        for review in self.inventory["units"][0]["review"].values():
-            review.update(status="passed", reviewed_at="2026-10-02T10:00:00+08:00", result="synthetic fixture only")
         self.save_inventory()
         path = self.root / ".smart-handbook/.inventory.json"
         before = path.read_bytes()
@@ -296,26 +539,26 @@ class HandbookTest(unittest.TestCase):
         self.assertEqual(before, (self.root / self.module).read_bytes())
 
     def test_state_schema_version_and_digest(self):
-        self.state["schema_version"] = 2
+        self.state["schema_version"] = 3
         self.save_state()
         self.assertIn("state-invalid", self.codes(self.check()))
-        self.state["schema_version"] = 1
+        self.state["schema_version"] = 2
         self.state["pages"][self.module]["sources"][self.source] = "sha256:abc"
         self.save_state()
         self.assertIn("state-invalid", self.codes(self.check()))
 
     def test_bad_metadata_json(self):
         path = self.root / self.module
-        path.write_text(path.read_text().replace('"schema_version": 1', '"schema_version":'))
+        path.write_text(path.read_text().replace('"schema_version": 2', '"schema_version":'))
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_duplicate_json_keys(self):
         path = self.root / self.module
-        path.write_text(path.read_text().replace('"schema_version": 1', '"schema_version": 1, "schema_version": 1'))
+        path.write_text(path.read_text().replace('"schema_version": 2', '"schema_version": 2, "schema_version": 2'))
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_unsupported_metadata_schema(self):
-        self.change_meta(self.module, schema_version=2)
+        self.change_meta(self.module, schema_version=3)
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_bool_is_not_schema_version(self):
@@ -428,9 +671,9 @@ class HandbookTest(unittest.TestCase):
         self.assertEqual(hb.locate_symbol(path, "ApprovalService#approve(long)"), "unknown")
 
     def test_review_timestamp_required(self):
-        del self.state["pages"][self.module]["review"]["reviewed_at"]
-        self.save_state()
-        self.assertIn("state-invalid", self.codes(self.check()))
+        self.record["source_reviewed_at"] = None
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
 
     def test_verified_requires_observation(self):
         self.state["pages"][self.module]["verification"] = {"status": "verified"}

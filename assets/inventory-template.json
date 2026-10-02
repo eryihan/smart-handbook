@@ -1,10 +1,25 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "mode": "full",
   "status": "in-progress",
-  "target": {"commit": null, "worktree": "尚未确认", "recorded_at": null},
-  "scope": {"include": ["."], "exclude": []},
-  "discovery": {"checked": [], "methods": [], "remaining": ["目标范围尚未发现"]},
+  "target": {
+    "commit": null,
+    "worktree": "尚未确认",
+    "recorded_at": null
+  },
+  "scope": {
+    "include": [
+      "."
+    ],
+    "exclude": []
+  },
+  "discovery": {
+    "checked": [],
+    "methods": [],
+    "remaining": [
+      "目标范围尚未发现"
+    ]
+  },
   "files": [],
   "units": []
 }

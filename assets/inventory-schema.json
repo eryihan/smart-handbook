@@ -1,90 +1,340 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Agent-authored Handbook inventory V1",
+  "title": "Agent-authored Handbook inventory V2",
   "type": "object",
-  "required": ["schema_version", "mode", "status", "target", "scope", "discovery", "files", "units"],
+  "required": [
+    "schema_version",
+    "mode",
+    "status",
+    "target",
+    "scope",
+    "discovery",
+    "files",
+    "units"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "mode": {"enum": ["full", "navigation"]},
-    "status": {"enum": ["in-progress", "incomplete", "complete"]},
-    "target": {
-      "type": "object", "required": ["commit", "worktree", "recorded_at"],
-      "properties": {
-        "commit": {"oneOf": [{"$ref": "#/$defs/text"}, {"const": null}]},
-        "worktree": {"$ref": "#/$defs/text"},
-        "recorded_at": {"$ref": "#/$defs/time"}
-      }
+    "schema_version": {
+      "const": 2
     },
-    "scope": {
-      "type": "object", "required": ["include", "exclude"],
-      "properties": {
-        "include": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
-        "exclude": {"type": "array", "items": {
-          "type": "object", "required": ["path", "reason"],
-          "properties": {"path": {"$ref": "#/$defs/text"}, "reason": {"$ref": "#/$defs/text"}}
-        }}
-      }
-    },
-    "discovery": {
-      "type": "object", "required": ["checked", "methods", "remaining"],
-      "properties": {
-        "checked": {"$ref": "#/$defs/texts"}, "methods": {"$ref": "#/$defs/texts"},
-        "remaining": {"$ref": "#/$defs/texts"}
-      }
-    },
-    "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
-    "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}}
-  },
-  "$defs": {
-    "text": {"type": "string", "minLength": 1},
-    "texts": {"type": "array", "items": {"$ref": "#/$defs/text"}},
-    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-    "ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
-    "time": {"oneOf": [{"type": "string", "format": "date-time"}, {"const": null}]},
-    "file": {
-      "type": "object", "required": ["path", "fingerprint", "role", "units", "disposition", "reason"],
-      "properties": {
-        "path": {"$ref": "#/$defs/text"},
-        "fingerprint": {"oneOf": [{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, {"const": null}]},
-        "role": {"$ref": "#/$defs/text"}, "units": {"$ref": "#/$defs/ids"},
-        "disposition": {"enum": ["pending", "assigned", "excluded"]}, "reason": {"type": "string"}
-      },
-      "allOf": [
-        {"if": {"properties": {"disposition": {"const": "assigned"}}}, "then": {"properties": {"units": {"minItems": 1}}}},
-        {"if": {"properties": {"disposition": {"enum": ["pending", "excluded"]}}}, "then": {"properties": {"reason": {"$ref": "#/$defs/text"}}}}
+    "mode": {
+      "enum": [
+        "full",
+        "navigation"
       ]
     },
-    "unit": {
-      "type": "object", "required": ["id", "name", "entrypoints", "pages", "sources", "depends_on", "status", "gaps", "review"],
+    "status": {
+      "enum": [
+        "in-progress",
+        "incomplete",
+        "complete"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "commit",
+        "worktree",
+        "recorded_at"
+      ],
       "properties": {
-        "id": {"$ref": "#/$defs/id"}, "name": {"$ref": "#/$defs/text"},
-        "entrypoints": {"type": "array", "items": {
-          "type": "object", "required": ["path", "trigger"],
-          "properties": {"path": {"$ref": "#/$defs/text"}, "symbol": {"$ref": "#/$defs/text"}, "trigger": {"$ref": "#/$defs/text"}}
-        }},
-        "pages": {"$ref": "#/$defs/texts"}, "sources": {"$ref": "#/$defs/texts"},
-        "depends_on": {"$ref": "#/$defs/ids"},
-        "status": {"enum": ["pending", "analysing", "needs-review", "accepted", "known-gap"]},
-        "gaps": {"$ref": "#/$defs/texts"},
-        "review": {
-          "type": "object", "required": ["source", "reading"],
-          "properties": {"source": {"$ref": "#/$defs/review"}, "reading": {"$ref": "#/$defs/review"}}
+        "commit": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/text"
+            },
+            {
+              "const": null
+            }
+          ]
+        },
+        "worktree": {
+          "$ref": "#/$defs/text"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/time"
         }
       }
     },
-    "review": {
-      "type": "object", "required": ["status", "reviewed_at", "scope", "result"],
+    "scope": {
+      "type": "object",
+      "required": [
+        "include",
+        "exclude"
+      ],
       "properties": {
-        "status": {"enum": ["pending", "passed", "failed", "unavailable"]},
-        "reviewed_at": {"$ref": "#/$defs/time"}, "scope": {"type": "string"}, "result": {"type": "string"}
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/text"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "reason"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/text"
+              },
+              "reason": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "required": [
+        "checked",
+        "methods",
+        "remaining"
+      ],
+      "properties": {
+        "checked": {
+          "$ref": "#/$defs/texts"
+        },
+        "methods": {
+          "$ref": "#/$defs/texts"
+        },
+        "remaining": {
+          "$ref": "#/$defs/texts"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unit"
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "texts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/text"
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "ids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    },
+    "time": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "const": null
+        }
+      ]
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "path",
+        "fingerprint",
+        "role",
+        "units",
+        "disposition",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/text"
+        },
+        "fingerprint": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "const": null
+            }
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/text"
+        },
+        "units": {
+          "$ref": "#/$defs/ids"
+        },
+        "disposition": {
+          "enum": [
+            "pending",
+            "assigned",
+            "excluded"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
       },
-      "allOf": [{
-        "if": {"properties": {"status": {"const": "passed"}}},
-        "then": {"properties": {
-          "reviewed_at": {"type": "string", "format": "date-time"},
-          "scope": {"$ref": "#/$defs/text"}, "result": {"$ref": "#/$defs/text"}
-        }}
-      }]
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "const": "assigned"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "units": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "disposition": {
+                "enum": [
+                  "pending",
+                  "excluded"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/text"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "unit": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "entrypoints",
+        "pages",
+        "sources",
+        "depends_on",
+        "gaps"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/text"
+        },
+        "entrypoints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entry"
+          }
+        },
+        "pages": {
+          "$ref": "#/$defs/texts"
+        },
+        "sources": {
+          "$ref": "#/$defs/texts"
+        },
+        "depends_on": {
+          "$ref": "#/$defs/ids"
+        },
+        "status": false,
+        "gaps": {
+          "$ref": "#/$defs/texts"
+        },
+        "review": false
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "id",
+        "path",
+        "trigger",
+        "status",
+        "claims",
+        "gaps",
+        "reviews"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "$ref": "#/$defs/text"
+        },
+        "symbol": {
+          "$ref": "#/$defs/text"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "trigger": {
+          "$ref": "#/$defs/text"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "analysing",
+            "needs-review",
+            "accepted",
+            "known-gap"
+          ]
+        },
+        "claims": {
+          "$ref": "#/$defs/ids"
+        },
+        "gaps": {
+          "$ref": "#/$defs/texts"
+        },
+        "reviews": {
+          "$ref": "#/$defs/texts"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "symbol"
+          ]
+        },
+        {
+          "required": [
+            "line"
+          ],
+          "properties": {
+            "symbol": false
+          }
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Handbook source-backed reading review V2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "target",
+    "sources",
+    "pages",
+    "source_reviewed_at",
+    "reader",
+    "scenarios",
+    "not_applicable"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "worktree"
+      ],
+      "properties": {
+        "commit": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/text"
+            },
+            {
+              "const": null
+            }
+          ]
+        },
+        "worktree": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "sources": {
+      "$ref": "#/$defs/snapshots"
+    },
+    "pages": {
+      "$ref": "#/$defs/snapshots"
+    },
+    "source_reviewed_at": {
+      "$ref": "#/$defs/time"
+    },
+    "reader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "isolation",
+        "description"
+      ],
+      "properties": {
+        "isolation": {
+          "enum": [
+            "independent",
+            "unavailable"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scenario"
+      }
+    },
+    "not_applicable": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/not_applicable"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "time": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "const": null
+        }
+      ]
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/text"
+        },
+        "symbol": {
+          "$ref": "#/$defs/text"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "topic": {
+      "enum": [
+        "normal",
+        "rejection",
+        "effective-time",
+        "partial-failure",
+        "repeat",
+        "async"
+      ]
+    },
+    "snapshots": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$"
+      }
+    },
+    "not_applicable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "sources"
+      ],
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/text"
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/locator"
+          }
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "entrypoints",
+        "topics",
+        "question",
+        "expected",
+        "reading",
+        "verdict",
+        "assessment",
+        "reviewed_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "entrypoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "topics": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/topic"
+          }
+        },
+        "question": {
+          "$ref": "#/$defs/text"
+        },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "answer",
+            "sources"
+          ],
+          "properties": {
+            "answer": {
+              "type": "string"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/locator"
+              }
+            }
+          }
+        },
+        "reading": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "answer",
+            "evidence",
+            "locations"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "pending",
+                "answered",
+                "unavailable"
+              ]
+            },
+            "answer": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "page",
+                  "section"
+                ],
+                "properties": {
+                  "page": {
+                    "$ref": "#/$defs/text"
+                  },
+                  "section": {
+                    "$ref": "#/$defs/text"
+                  }
+                }
+              }
+            },
+            "locations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/locator"
+              }
+            }
+          }
+        },
+        "verdict": {
+          "enum": [
+            "pending",
+            "passed",
+            "failed"
+          ]
+        },
+        "assessment": {
+          "type": "string"
+        },
+        "reviewed_at": {
+          "$ref": "#/$defs/time"
+        }
+      }
+    }
+  }
+}

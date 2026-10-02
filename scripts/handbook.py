@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, standard-library checks and candidate impact for Handbook V1."""
+"""Read-only, standard-library checks and candidate impact for Handbook V2."""
 
 import argparse
 import hashlib
@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -16,6 +16,13 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 HANDBOOK_DIR = ".smart-handbook"
 STATE_PATH = HANDBOOK_DIR + "/.state.json"
 INVENTORY_PATH = HANDBOOK_DIR + "/.inventory.json"
+REVIEW_DIR = HANDBOOK_DIR + "/.reviews/"
+REVIEW_TOPICS = {"normal", "rejection", "effective-time", "partial-failure", "repeat", "async"}
+RESOURCE_ROLES = {"database": {"implementation", "persistence"},
+                  "async": {"implementation", "handoff"},
+                  **{kind: {"implementation", "configuration"}
+                     for kind in ("redis", "mq", "es", "rpc", "http")},
+                  "other": {"implementation"}}
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 META_RE = re.compile(r"<!--\s*handbook-meta\b([\s\S]*?)-->")
 ROOT_KINDS = {"README.md": "readme", "system.md": "system", "map.md": "map",
@@ -89,8 +96,11 @@ def validate(value, schema, document, location="$", errors=None):
             errors.append(location + ": invalid format")
         if schema.get("format") == "date-time":
             try:
-                if datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
                     raise ValueError("timezone required")
+                if parsed > datetime.now(timezone.utc):
+                    errors.append(location + ": recorded time cannot be in the future")
             except ValueError:
                 errors.append(location + ": timestamp with timezone required")
     if type(value) is int and "minimum" in schema and value < schema["minimum"]:
@@ -230,12 +240,15 @@ class Handbook:
     def __init__(self, root):
         self.root = root.resolve()
         self.issues, self.pages = [], {}
-        self.state = {"schema_version": 1, "pages": {}}
+        self.state = {"schema_version": 2, "pages": {}}
         self.state_available = False
         self.inventory = None
+        self.entries, self.claims, self.reviews = {}, {}, {}
+        self.digest_cache = {}
         self.metadata_schema = parse_json((ASSETS / "metadata-schema.json").read_text())
         self.state_schema = parse_json((ASSETS / "state-schema.json").read_text())
         self.inventory_schema = parse_json((ASSETS / "inventory-schema.json").read_text())
+        self.review_schema = parse_json((ASSETS / "review-schema.json").read_text())
         self.load()
 
     def issue(self, level, code, path, message):
@@ -286,6 +299,8 @@ class Handbook:
                 self.pages[rel] = {"metadata": metadata, "text": text, "sections": titles}
             except (OSError, UnicodeError, ValueError) as exc:
                 self.issue("error", "metadata-invalid", rel, str(exc))
+        self.claims = {claim["id"]: (rel, claim) for rel, page in self.pages.items()
+                       for claim in page["metadata"]["claims"]}
         state_path = directory / ".state.json"
         if not state_path.exists():
             self.issue("warning", "baseline-unavailable", STATE_PATH, "No recorded state")
@@ -316,6 +331,9 @@ class Handbook:
                     raise ValueError("; ".join(errors))
                 self.validate_inventory_relations(inventory)
                 self.inventory = inventory
+                self.entries = {entry["id"]: entry for unit in inventory["units"]
+                                for entry in unit["entrypoints"]}
+                self.load_reviews()
         except (OSError, UnicodeError, ValueError) as exc:
             self.issue("error", "inventory-invalid", INVENTORY_PATH, str(exc))
 
@@ -323,8 +341,11 @@ class Handbook:
         """Check Agent-recorded structure, never discover or classify source code."""
         files = {item["path"]: item for item in inventory["files"]}
         units = {item["id"]: item for item in inventory["units"]}
+        entries = [entry for unit in units.values() for entry in unit["entrypoints"]]
         if len(files) != len(inventory["files"]) or len(units) != len(inventory["units"]):
             raise ValueError("Duplicate inventory file path or unit ID")
+        if len({entry["id"] for entry in entries}) != len(entries):
+            raise ValueError("Duplicate entrypoint ID")
         for scope in inventory["scope"]["include"]:
             if scope != ".":
                 safe_path(self.root, scope)
@@ -350,21 +371,204 @@ class Handbook:
                 safe_path(self.root, page)
                 if page not in self.pages:
                     raise ValueError("Unknown unit page: " + unit["id"] + ": " + page)
-            if unit["status"] == "accepted" and (unit["gaps"] or not unit["pages"] or not unit["sources"]
-                    or any(unit["review"][kind]["status"] != "passed" for kind in ("source", "reading"))):
-                raise ValueError("Accepted unit requires sources, pages, no gaps and both reviews: " + unit["id"])
-            if unit["status"] == "accepted" and not any(
-                    self.pages[page]["metadata"]["kind"] in ("module", "flow")
-                    and self.pages[page]["metadata"]["coverage"] == "documented"
-                    and self.pages[page]["metadata"]["claims"] for page in unit["pages"]):
-                raise ValueError("Accepted unit requires a documented module/flow with claims: " + unit["id"])
+            for entry in unit["entrypoints"]:
+                if len(entry["claims"]) != len(set(entry["claims"])) or len(entry["reviews"]) != len(set(entry["reviews"])):
+                    raise ValueError("Duplicate entry claim/review: " + entry["id"])
+                for claim_id in entry["claims"]:
+                    if claim_id not in self.claims or self.claims[claim_id][0] not in unit["pages"]:
+                        raise ValueError("Entry claim is not on its unit pages: " + entry["id"] + ": " + claim_id)
+                for review in entry["reviews"]:
+                    safe_path(self.root, review)
+                    if not review.startswith(REVIEW_DIR) or not review.endswith(".json"):
+                        raise ValueError("Review must be a .reviews/ JSON path: " + review)
+                if entry["status"] == "accepted":
+                    if entry["gaps"] or not entry["claims"] or not entry["reviews"]:
+                        raise ValueError("Accepted entry requires claims, reviews and no gaps: " + entry["id"])
+                    if entry["path"].endswith(".java") and "#" not in entry.get("symbol", "") and "line" not in entry:
+                        raise ValueError("Accepted Java entry must identify a handler, not just a class: " + entry["id"])
+                    self.validate_snapshot_locator(entry, files[entry["path"]]["fingerprint"])
+                    linked = [self.claims[c] for c in entry["claims"]]
+                    if not all(self.pages[p]["metadata"]["coverage"] == "documented" for p, _ in linked):
+                        raise ValueError("Accepted entry claims require documented pages: " + entry["id"])
+                    if not any("implementation" in s["roles"] for _, c in linked for s in c["sources"]):
+                        raise ValueError("Accepted entry requires implementation evidence: " + entry["id"])
         if inventory["status"] == "complete":
             if not inventory["discovery"]["checked"] or not inventory["discovery"]["methods"]:
                 raise ValueError("Complete inventory requires discovery records")
             if inventory["discovery"]["remaining"] or any(item["disposition"] == "pending" for item in files.values()):
                 raise ValueError("Complete inventory has pending discovery or files")
-            if inventory["mode"] == "full" and any(unit["status"] != "accepted" for unit in units.values()):
-                raise ValueError("Full completion requires every unit to be accepted")
+            if inventory["mode"] == "full" and (not units or any(unit["gaps"] for unit in units.values())
+                    or any(entry["status"] != "accepted" for entry in entries)):
+                raise ValueError("Full completion requires every entry to be accepted and no local gaps")
+
+    def file_digest(self, relative):
+        if relative not in self.digest_cache:
+            self.digest_cache[relative] = fingerprint(safe_path(self.root, relative))
+        return self.digest_cache[relative]
+
+    def validate_snapshot_locator(self, locator, digest):
+        """Reject demonstrably broken locations only in the recorded version."""
+        path = safe_path(self.root, locator["path"])
+        try:
+            if self.file_digest(locator["path"]) != digest:
+                return  # Old locations need review against changed sources, not relabelling.
+        except OSError:
+            return
+        if locator.get("line") and locator["line"] > len(path.read_text(encoding="utf-8").splitlines()):
+            raise ValueError("Source line is outside fingerprinted file: " + locator["path"])
+        if locator.get("symbol") and locate_symbol(path, locator["symbol"]) == "broken":
+            raise ValueError("Source symbol is missing in fingerprinted file: " + locator["path"] + ": " + locator["symbol"])
+
+    def load_reviews(self):
+        """Load only referenced records; historical orphans do not certify entries."""
+        ids = set()
+        for rel in sorted({r for entry in self.entries.values() for r in entry["reviews"]}):
+            try:
+                record = parse_json(safe_path(self.root, rel).read_text(encoding="utf-8"))
+                errors = validate(record, self.review_schema, self.review_schema)
+                if errors:
+                    raise ValueError("; ".join(errors))
+                if record["id"] in ids:
+                    raise ValueError("Duplicate review ID: " + record["id"])
+                ids.add(record["id"])
+                self.validate_review_relations(rel, record)
+                self.reviews[rel] = record
+            except (OSError, UnicodeError, ValueError) as exc:
+                self.issue("error", "review-invalid", rel, str(exc))
+
+    def validate_review_relations(self, rel, record):
+        snapshots = record["sources"]
+        files = {item["path"] for item in self.inventory["files"]}
+        for path in snapshots:
+            safe_path(self.root, path)
+            if path not in files or path.startswith(HANDBOOK_DIR + "/"):
+                raise ValueError("Review source is not inventoried implementation: " + path)
+        for path in record["pages"]:
+            safe_path(self.root, path)
+            if path not in self.pages:
+                raise ValueError("Unknown review page: " + path)
+
+        def source_refs(refs):
+            for source in refs:
+                safe_path(self.root, source["path"])
+                if source["path"] not in snapshots:
+                    raise ValueError("Expected source is not fingerprinted: " + source["path"])
+                self.validate_snapshot_locator(source, snapshots[source["path"]])
+
+        def entry_ref(entry_id):
+            if entry_id not in self.entries or rel not in self.entries[entry_id]["reviews"]:
+                raise ValueError("Review scope is not linked to entry: " + entry_id)
+
+        scenario_ids = set()
+        for scenario in record["scenarios"]:
+            if scenario["id"] in scenario_ids:
+                raise ValueError("Duplicate scenario ID: " + scenario["id"])
+            scenario_ids.add(scenario["id"])
+            for entry_id in scenario["entrypoints"]:
+                entry_ref(entry_id)
+            source_refs(scenario["expected"]["sources"])
+            for source in scenario["reading"]["locations"]:
+                source_refs([source])
+                if not source.get("symbol") and not source.get("line"):
+                    raise ValueError("Reading location requires symbol or line")
+                if source["path"].endswith(".java") and "#" not in source.get("symbol", "") and "line" not in source:
+                    raise ValueError("Reading location must identify a handler, not just a Java class")
+            for evidence in scenario["reading"]["evidence"]:
+                page = evidence["page"]
+                if page not in record["pages"] or evidence["section"] not in self.pages[page]["sections"]:
+                    raise ValueError("Reading evidence requires a fingerprinted page and real H2: " + page)
+            if scenario["verdict"] != "pending":
+                if not record["source_reviewed_at"] or not scenario["reviewed_at"] or not scenario["assessment"].strip():
+                    raise ValueError("A verdict requires actual source/review times and assessment")
+                if datetime.fromisoformat(scenario["reviewed_at"].replace("Z", "+00:00")) < datetime.fromisoformat(record["source_reviewed_at"].replace("Z", "+00:00")):
+                    raise ValueError("Reading verdict predates source questions")
+            if scenario["verdict"] == "passed":
+                if (record["reader"]["isolation"] != "independent" or scenario["reading"]["status"] != "answered"
+                        or not scenario["reading"]["answer"].strip() or not scenario["expected"]["answer"].strip()
+                        or not scenario["expected"]["sources"] or not scenario["reading"]["evidence"]
+                        or not scenario["reading"]["locations"]):
+                    raise ValueError("Passed scenario requires independent answers, evidence and code location")
+                expected_paths = {s["path"] for s in scenario["expected"]["sources"]}
+                for entry_id in scenario["entrypoints"]:
+                    own_sources = {s["path"] for c in self.entries[entry_id]["claims"]
+                                   for s in self.claims[c][1]["sources"] if "implementation" in s["roles"]}
+                    if not own_sources & expected_paths:
+                        raise ValueError("Scenario does not cite its entry implementation: " + entry_id)
+        for entry_id, exclusions in record["not_applicable"].items():
+            entry_ref(entry_id)
+            if set(exclusions) - (REVIEW_TOPICS - {"normal"}):
+                raise ValueError("Unknown or inapplicable normal review topic")
+            for exclusion in exclusions.values():
+                source_refs(exclusion["sources"])
+            tested = {t for s in record["scenarios"] if entry_id in s["entrypoints"] for t in s["topics"]}
+            if tested & exclusions.keys():
+                raise ValueError("Topic cannot be both tested and not applicable: " + entry_id)
+
+    def check_reviews(self):
+        """Check recorded answers and snapshots, without judging their semantics."""
+        stale, verified_sources = set(), set()
+        for rel, record in self.reviews.items():
+            for group in ("sources", "pages"):
+                for path, digest in record[group].items():
+                    try:
+                        current = self.file_digest(path)
+                    except (OSError, ValueError):
+                        current = None
+                    if current != digest:
+                        stale.add(rel)
+                        self.issue("warning", "review-snapshot-changed", rel, path)
+        states = {}
+        for entry_id, entry in self.entries.items():
+            status, missing = entry["status"], []
+            records = [self.reviews[r] for r in entry["reviews"] if r in self.reviews]
+            cases = [s for r in records for s in r["scenarios"] if entry_id in s["entrypoints"]]
+            topics = {t for s in cases if s["verdict"] == "passed" for t in s["topics"]}
+            topics.update(t for r in records for t in r["not_applicable"].get(entry_id, {}))
+            paths = {self.claims[c][0] for c in entry["claims"]}
+            sources = {entry["path"]} | {s["path"] for c in entry["claims"] for s in self.claims[c][1]["sources"]}
+            if status == "accepted":
+                if not cases or any(s["verdict"] != "passed" for s in cases):
+                    missing.append("every scoped scenario must pass")
+                if topics != REVIEW_TOPICS:
+                    missing.append("missing scenario topics: " + ", ".join(sorted(REVIEW_TOPICS - topics)))
+                if len(records) != len(entry["reviews"]) or any(r["source_reviewed_at"] is None or r["reader"]["isolation"] != "independent" for r in records):
+                    missing.append("independent source/reading records are unavailable")
+                snap_sources = {p for r in records for p in r["sources"]}
+                snap_pages = {p for r in records for p in r["pages"]}
+                if not sources <= snap_sources or not paths <= snap_pages:
+                    missing.append("claim sources/pages are not fully fingerprinted")
+                if missing:
+                    status = "needs-review"
+                    self.issue("error", "entry-review-incomplete", INVENTORY_PATH, entry_id + ": " + "; ".join(missing))
+                elif set(entry["reviews"]) & stale:
+                    status = "needs-review"
+                else:
+                    # A grouped record cannot certify sources belonging only to an unfinished peer.
+                    verified_sources.update(sources)
+                    verified_sources.update(s["path"] for case in cases for s in case["expected"]["sources"])
+                    verified_sources.update(s["path"] for r in records
+                                            for exclusion in r["not_applicable"].get(entry_id, {}).values()
+                                            for s in exclusion["sources"])
+            states[entry_id] = {"recorded_status": entry["status"], "status": status,
+                                "claims": entry["claims"], "reviews": entry["reviews"]}
+        units = {}
+        if self.inventory:
+            for unit in self.inventory["units"]:
+                statuses = [states[e["id"]]["status"] for e in unit["entrypoints"]]
+                supported = bool(unit["sources"]) and set(unit["sources"]) <= verified_sources
+                if unit["gaps"] or "known-gap" in statuses:
+                    status = "known-gap"
+                elif supported and all(s == "accepted" for s in statuses):
+                    status = "accepted"
+                elif "analysing" in statuses:
+                    status = "analysing"
+                elif not statuses or "needs-review" in statuses:
+                    status = "needs-review"
+                else:
+                    status = "pending"
+                units[unit["id"]] = {"status": status, "pages": unit["pages"],
+                                     "entrypoints": [e["id"] for e in unit["entrypoints"]]}
+        return states, units
 
     def inventory_candidates(self, changed):
         """Follow only dependencies recorded by the Agent; return review candidates."""
@@ -391,7 +595,7 @@ class Handbook:
                 continue
             try:
                 path = safe_path(self.root, item["path"])
-                if not path.is_file() or (item["fingerprint"] is not None and fingerprint(path) != item["fingerprint"]):
+                if not path.is_file() or (item["fingerprint"] is not None and self.file_digest(item["path"]) != item["fingerprint"]):
                     changed.add(item["path"])
                 elif item["fingerprint"] is None:
                     unknown.add(item["path"])
@@ -400,11 +604,29 @@ class Handbook:
         for code, paths in (("inventory-source-changed", changed), ("inventory-source-unknown", unknown)):
             for path in sorted(paths):
                 self.issue("warning", code, INVENTORY_PATH, path)
+        entries, units = self.check_reviews()
+        related = self.inventory_candidates(changed | unknown)
+        for candidate in related:
+            unit = units[candidate["id"]]
+            if unit["status"] == "accepted":
+                unit["status"] = "needs-review"
+            for entry_id in unit["entrypoints"]:
+                if entries[entry_id]["status"] == "accepted":
+                    entries[entry_id]["status"] = "needs-review"
         recorded = self.inventory["status"]
+        ready = (not changed and not unknown and not self.inventory["discovery"]["remaining"]
+                 and all(f["disposition"] != "pending" for f in self.inventory["files"])
+                 and bool(self.inventory["discovery"]["checked"]) and bool(self.inventory["discovery"]["methods"]))
+        if self.inventory["mode"] == "full":
+            ready = ready and bool(units) and all(u["status"] == "accepted" for u in units.values())
+        if recorded == "complete" and not ready and not (changed or unknown):
+            self.issue("error", "inventory-completion-conflict", INVENTORY_PATH,
+                       "Recorded completion is not supported by entry reviews and coverage")
         return {"mode": self.inventory["mode"], "recorded_status": recorded,
-                "status": "incomplete" if (changed or unknown) and recorded == "complete" else recorded,
+                "status": "incomplete" if not ready and recorded == "complete" else recorded,
+                "ready_to_complete": bool(ready), "entries": entries, "units": units,
                 "changed_files": sorted(changed), "unknown_files": sorted(unknown),
-                "related_units": self.inventory_candidates(changed | unknown)}
+                "related_units": related}
 
     def current_sources(self, page):
         return {source["path"] for claim in page["metadata"]["claims"] for source in claim["sources"]}
@@ -445,6 +667,11 @@ class Handbook:
                 claims[claim["id"]] = rel
                 if claim["section"] not in page["sections"]:
                     self.issue("error", "claim-section-missing", rel, claim["section"])
+                roles = {role for source in claim["sources"] for role in source["roles"]}
+                required = {role for kind in claim["resource_types"] for role in RESOURCE_ROLES[kind]}
+                if not required <= roles:
+                    self.issue("error", "claim-evidence-incomplete", rel,
+                               claim["id"] + ": missing roles " + ", ".join(sorted(required - roles)))
             for scope in meta.get("source_ranges", []) + meta.get("config_ranges", []):
                 self.check_range(rel, scope)
         for rel, page in self.pages.items():
@@ -506,7 +733,7 @@ class Handbook:
                         full = safe_path(self.root, path)
                         if not full.is_file():
                             raise ValueError("Source file is missing: " + path)
-                        digest = fingerprint(full)
+                        digest = self.file_digest(path)
                         status = "baseline-unavailable" if path not in previous else (
                             "unchanged" if previous[path] == digest else "changed")
                         source_results[path] = {"status": status, "fingerprint": digest}
@@ -534,8 +761,13 @@ class Handbook:
                 state = "unknown"
             else:
                 state = "unchanged"
-            review = recorded.get("review", {}).get("status", "needs_review")
-            if state != "unchanged" or undocumented or rel in affected_pages:
+            page_claims = {c["id"] for c in page["metadata"]["claims"]}
+            linked_entries = [entry_id for entry_id, entry in self.entries.items()
+                              if page_claims & set(entry["claims"])]
+            reviewed = bool(linked_entries) and all(
+                inventory["entries"][e]["status"] == "accepted" for e in linked_entries)
+            review = "reviewed_by_ai" if reviewed else "needs_review"
+            if state in ("changed", "broken") or undocumented or rel in affected_pages:
                 review = "needs_review"
             states[rel] = {"id": page["metadata"]["id"], "coverage": page["metadata"]["coverage"],
                            "source_state": state, "sources": source_results,
@@ -543,12 +775,17 @@ class Handbook:
                            "recorded_verification": recorded.get("verification", {"status": "not-run"})}
         for rel in sorted(self.state["pages"].keys() - self.pages.keys()):
             self.issue("warning", "state-page-stale", rel, "Recorded page is missing or invalid; retain state for impact review")
+        if any(issue["level"] == "error" for issue in self.issues):
+            inventory["ready_to_complete"] = False
+            if inventory.get("recorded_status") == "complete":
+                inventory["status"] = "incomplete"
         return {"command": "check", "pages": states, "inventory": inventory, "issues": self.issues,
                 "read_only": True,
                 "limits": ["No business semantics or runtime verification is performed.",
                            "Unchanged fingerprints cover directly recorded files only.",
                            "Java symbol location is a conservative textual check; unsupported syntax remains unverified.",
-                           "Inventory discovery, ownership and review truth require Agent assessment; no source scan is performed."]}
+                           "Inventory discovery, ownership and review answer truth require Agent assessment; no source scan is performed.",
+                           "Entry progress and recorded scenarios are checked; this does not prove all business branches were discovered."]}
 
 
 def git(root, *arguments):
@@ -588,7 +825,7 @@ def impact(book, base=None, target=None):
     result = {"command": "impact", "candidate_only": True, "read_only": True,
               "changed_files": [], "renames": [], "direct_claims": [],
               "previous_pages": [], "related_modules": [], "related_flows": [],
-              "unowned_changes": [], "related_units": [], "issues": book.issues,
+              "unowned_changes": [], "related_units": [], "related_entries": [], "review_candidates": [], "issues": book.issues,
               "metadata_version": "current-worktree",
               "limits": ["Candidates need AI source review; indirect dependencies can require wider analysis."]}
     changed, available = set(), False
@@ -698,6 +935,15 @@ def impact(book, base=None, target=None):
                        if item["disposition"] in ("assigned", "excluded"))
     result["unowned_changes"] = sorted(changed - covered)
     result["related_units"] = book.inventory_candidates(changed)
+    affected = {u["id"] for u in result["related_units"]}
+    if book.inventory:
+        result["related_entries"] = [{"id": e["id"], "unit": u["id"], "claims": e["claims"]}
+                                     for u in book.inventory["units"] if u["id"] in affected
+                                     for e in u["entrypoints"]]
+        entries, _ = book.check_reviews()
+        result["review_candidates"] = [{"id": entry_id, "reviews": entry["reviews"]}
+                                       for entry_id, entry in entries.items()
+                                       if entry["recorded_status"] == "accepted" and entry["status"] != "accepted"]
     return result
 
 
@@ -709,7 +955,7 @@ def render(result):
             rows.append(path + ": " + page["coverage"] + " / " + page["source_state"] + " / " + page["review"])
     else:
         rows.append("Mode: " + result["mode"] + "; baseline: " + result["baseline_status"])
-        for key in ("changed_files", "direct_claims", "previous_pages", "related_modules", "related_flows", "related_units", "unowned_changes"):
+        for key in ("changed_files", "direct_claims", "previous_pages", "related_modules", "related_flows", "related_units", "related_entries", "review_candidates", "unowned_changes"):
             rows.append(key + ": " + json.dumps(result[key], ensure_ascii=False))
     for issue in result["issues"]:
         rows.append(issue["level"] + " " + issue["code"] + " " + issue["path"] + ": " + issue["message"])

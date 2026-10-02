@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "id": "review-example",
+  "target": {
+    "commit": null,
+    "worktree": "尚未确认"
+  },
+  "sources": {},
+  "pages": {},
+  "source_reviewed_at": null,
+  "reader": {
+    "isolation": "unavailable",
+    "description": "尚未安排独立阅读"
+  },
+  "scenarios": [],
+  "not_applicable": {}
+}
