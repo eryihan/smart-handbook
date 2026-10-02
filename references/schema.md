@@ -1,16 +1,17 @@
-# Handbook V1 格式与工具契约
+# Handbook V2 格式与工具契约
 
 - [页面与目录](#页面与目录)
 - [页面 metadata](#页面-metadata)
 - [证据与定位](#证据与定位)
 - [状态文件](#状态文件)
+- [验收记录](#验收记录)
 - [保存复核结果](#保存复核结果)
 - [Python CLI](#python-cli)
 - [impact 的比较范围](#impact-的比较范围)
 
 ## 页面与目录
 
-项目知识位于目标仓库根目录的 `.smart-handbook/`：
+项目知识位于目标仓库根目录：
 
 ```text
 .smart-handbook/
@@ -21,164 +22,143 @@
 ├── modules/<module>.md
 ├── flows/<flow>.md
 ├── .inventory.json
-└── .state.json
+├── .state.json
+└── .reviews/<business>.json
 ```
 
-四个根页面必需，module 和 flow 按项目需要建立。每页一个 H1、至少一个 H2，并包含一个 `handbook-meta` HTML 注释。注释放在 H1 之后、第一个 H2 之前；围栏代码块中的示例不计入，正文中的额外 metadata 会报错。
+四个根页面必需，module / flow 按业务需要建立。每页一个 H1、至少一个 H2，在 H1 之后、第一个 H2 之前放一个 handbook-meta HTML 注释。代码块中的示例不计入；额外 metadata、重复 JSON key 与非 JSON 常量均报错。
 
-`.inventory.json` 是 Agent 维护的发现、归属和进度记录，结构见[清单与进度](project-inventory.md)。清单是必需产物，格式见[清单 schema](../assets/inventory-schema.json)。check 校验已记录结构、引用、完成状态与指纹，impact 利用 Agent 记录的依赖给出候选；不自动发现代码或判定业务边界。
+module / flow 使用[模板](../assets/handbook/)的固定 H2，claim.section 与所属 H2 完整标题一致。当前页面、状态、清单与验收记录均为 schema_version 2；旧产物重新 init，不自动兼容或迁移。
 
-module 和 flow 使用[模板](../assets/handbook/)中的固定 H2 标题。claim 的 `section` 必须与所属 H2 完整标题一致。
+清单保存发现、入口进度与验收关联，格式见[清单与进度](project-inventory.md)及[清单 schema](../assets/inventory-schema.json)。脚本不发现代码或划分业务。
 
 ## 页面 metadata
 
-格式定义见 [metadata-schema.json](../assets/metadata-schema.json)。`schema_version` 必须为整数 `1`；JSON 重复 key、非 JSON 常量和未知字段均不接受。
+格式见[metadata-schema.json](../assets/metadata-schema.json)，未知字段不接受。
 
 | 字段 | 要求 |
 |---|---|
-| `id` | 小写字母、数字、连字符，匹配 `^[a-z0-9][a-z0-9-]*$`；页面 ID 全库唯一 |
-| `kind` | `readme` / `system` / `map` / `working-guide` / `module` / `flow`，与页面位置一致 |
-| `coverage` | `navigation-only` / `documented` / `known-gap`，根据页面声明的分析范围和内容验收判断；不代表全模块或运行行为验证 |
-| `claims` | 关键行为和约束的列表，可为空；普通说明无需逐句建 claim |
-| `claim.id` | claim ID 全库唯一，格式同页面 ID；两类 ID 分别检查唯一性 |
-| `claim.section` | 所属 H2 的完整标题 |
-| `claim.sources` | 至少一个实现文件；必填 `path`，可选 `symbol` 和正整数 `line` |
-| module 的 `source_ranges`、`config_ranges` | 管理的源码、SQL、配置文件或目录，不使用 glob |
-| flow 的 `modules` | 参与模块的 metadata ID 列表 |
-| map 的 `modules` | 每项包含 `id`、`page`、`source_ranges`、`config_ranges`、`keywords`；页面和范围与 module 一致 |
-| map 的 `unowned_entries` | 未归属入口及原因的字符串列表 |
+| id | 全库唯一的小写字母、数字、连字符，匹配 `^[a-z0-9][a-z0-9-]*$` |
+| kind | readme / system / map / working-guide / module / flow，与路径一致 |
+| coverage | navigation-only / documented / known-gap，表达页面声明范围，不代表全模块或运行验证 |
+| claims | 关键结论，可为空；普通说明无需逐句建 claim |
+| claim.id / section | claim ID 全库唯一，与页面 ID 分别检查；section 为实际 H2 |
+| claim.resource_types | 当前结论涉及的 database / redis / mq / es / rpc / http / async / other，可为空 |
+| claim.sources | 至少一个来源，必填 path、roles，可选 symbol、正整数 line |
+| module.source_ranges / config_ranges | 相关源码、映射及配置的文件或目录，不使用 glob |
+| flow.modules | 参与模块的 metadata ID |
+| map.modules | id、page、source_ranges、config_ranges、keywords，与 module 一致 |
+| map.unowned_entries | 未归属入口及原因的字符串列表 |
 
-所有页面必填 `schema_version`、`id`、`kind`、`coverage`、`claims`。module、flow、map 还需填写表中对应字段。
+所有页面必填 schema_version、id、kind、coverage、claims。module / flow 的 documented 需要按[内容标准](endpoint-analysis.md)写清声明入口；关键本地链路未查清用 known-gap，纯导航用 navigation-only。全量完成由清单入口和有效验收记录汇总。
 
-module / flow 的 `documented` 需要明确已分析入口或用例，并完成[接口分析与内容验收](endpoint-analysis.md)。关键本地调用、SQL、中间件或异步状态链路未查清时使用 `known-gap`。纯导航使用 `navigation-only`。脚本对 documented 且 claims 为空的 module / flow 报 `documented-without-claims` 警告，并派生为 `needs_review`；其他正文缺项和业务完整性由 Agent 核对。数据与资源表放在既定 H2 下，清单独立保存。
-
-`path`、range、map 的 `page` 和状态中的页面 key 使用仓库根目录相对的 POSIX 路径。禁止绝对路径、`..`、以 `./` 开头的路径、反斜杠、`.git` 和指向仓库外的 symlink。Markdown 内部链接相对当前页面，可通过 `../` 跳转到仓库内的文件。
-
-以下示例应放入真实页面的 `handbook-meta` 注释，并替换为项目实际路径：
+示例只展示一个结论，实际按业务填写：
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "module-approval",
   "kind": "module",
   "coverage": "documented",
-  "source_ranges": ["src/main/java/example/approval"],
-  "config_ranges": ["src/main/resources/application.yml"],
+  "source_ranges": ["src/approval"],
+  "config_ranges": [],
   "claims": [{
-    "id": "approval-01",
+    "id": "approval-save",
     "section": "当前行为与关键约束",
-    "sources": [{
-      "path": "src/main/java/example/approval/ApprovalService.java",
-      "symbol": "ApprovalService#approve(Request)"
-    }]
+    "resource_types": ["database"],
+    "sources": [
+      {"path": "src/approval/ApprovalService.java", "symbol": "ApprovalService#save(Request)", "roles": ["implementation"]},
+      {"path": "src/approval/ApprovalMapper.xml", "line": 12, "roles": ["persistence"]}
+    ]
   }]
 }
 ```
 
+path、range、map.page 与机器记录使用仓库相对 POSIX 路径。禁止绝对路径、`..`、`./` 前缀、反斜杠、`.git` 和指向仓库外的 symlink。scope.include 的 `.` 只表示发现范围。Markdown 链接允许在仓库内通过 `../` 跳转。
+
 ## 证据与定位
 
-Implementation Evidence 包括源码、SQL、配置、构建定义、测试、运行观察和部署信息。Context Evidence 包括 README、ADR、OpenSpec、Issue、PR、历史设计、复盘和注释，用于说明背景及历史适用范围。
+来源角色为 implementation / persistence / configuration / handoff / definition。database 结论需要实现与持久化映射；Redis、MQ、ES、RPC、HTTP 需要使用实现与决定行为的配置；async 需要实现与交接证据。本仓库有接收方时 handoff 引用接收实现；接收方在仓库外时引用可见的客户端或协议交接边界，远端内部与最终结果未知须明确，不能用外部边界跳过本地消费或回写。一文件可有多个角色，例如注解 SQL 或代码常量，按实际内容标记。脚本核对已声明角色是否齐全，不判断内容是否真实支持结论。
 
-claim 的 `sources` 保存可读取的实现文件。运行观察另在正文中记录环境、版本、时间、方法和结果，不将日志观察伪装为源码路径。测试文件存在只说明有测试定义，执行结果需另行记录。
+来源内容和指纹要求见[证据与来源指纹](endpoint-analysis.md#证据与来源指纹)。业务资料、历史方案和注释用于背景；当前行为需要实际实现。测试存在不代表已执行，运行观察另记环境、版本、时间、方法和结果，不伪装成源码路径。
 
-claim 来源的内容要求见[证据与来源指纹](endpoint-analysis.md#证据与来源指纹)；本页定义保存格式与工具能够检查的定位范围。
+symbol 定位为保守 Java 文本检查，支持类型名和简单 `Type#method(SimpleType, int)`，不解析 AST / 调用图。复杂泛型、注解、varargs、多类型文件和其他语言返回 symbol-unverified，交由 Agent 核对；明确缺类型或方法报 symbol-broken。已验收入口与场景定位在指纹未变时核对明显缺失的方法及越界行号；源码已变时旧定位进入待复核，不能用当前文件否定历史位置。
 
-V1 的 symbol 检查限于 Java 类型名和 `Type#method(SimpleType, int)`。它采用文本匹配，支持简单声明、参数类型、数组和重载，不解析 AST 或调用图。`line` 仅辅助跳转。
-
-| 定位结果 | 含义 |
-|---|---|
-| `located` | 在支持的文本语法中找到类型或方法；行为仍需阅读代码 |
-| `symbol-broken` | 类型缺失，或单类型文件中完全找不到方法名 |
-| `symbol-unverified` | 复杂注解、泛型参数、varargs、多类型归属、构造器、其他语言或无法确认的签名；需读取源码核对 |
-
-链接检查支持常见单行 inline link、image、reference link 和标题 anchor，忽略代码、注释中的链接。多行链接、复杂嵌套括号、HTML 链接、自定义 anchor 和复杂标题标记需人工核对；外部 URL 不联网检查。
+链接检查支持常见单行 inline、image、reference link 与标题 anchor，忽略代码和注释。多行、复杂嵌套、HTML、自定义 anchor 等需人工核对，外部 URL 不联网检查。
 
 ## 状态文件
 
-格式定义见 [state-schema.json](../assets/state-schema.json)。`.smart-handbook/.state.json` 保存可重建的机器记录，业务结论保留在 Markdown。
+[state-schema.json](../assets/state-schema.json) 定义 `.state.json`。必填 schema_version、pages；可选 baseline.commit 保存默认 Git 比较基线。
 
-`schema_version` 和 `pages` 必填。`pages` 的 key 使用 `.smart-handbook/...md`；每项必填 `sources`，将仓库相对文件路径映射到原始字节的 `sha256:<64 lowercase hex>`。可选的 `baseline.commit` 作为默认 Git 比较基线。
+pages 的 key 为 `.smart-handbook/...md`，每项 sources 将该页全部 claim 来源映射为实际 `sha256:<64 lowercase hex>`。可选 source_state、source_checked_at 描述当时来源核对，可选 verification 保存运行验证；不保存独立的 review 状态。
 
-以下示例表示尚未建立来源指纹：
+| 维度 | 表达的事实 |
+|---|---|
+| 页面覆盖 | metadata.coverage 表达实际声明范围 |
+| 来源状态 | check 根据来源集合和指纹派生 broken / changed / baseline-unavailable / unknown / unchanged |
+| 内容复核 | check 根据入口及验收记录派生 reviewed_by_ai / needs_review，不手填页面 review |
+| 运行验证 | verification.status 为 verified / failed / not-run / unavailable，必填非空 conditions、method、observed |
 
-```json
-{
-  "schema_version": 1,
-  "pages": {
-    ".smart-handbook/modules/approval.md": {
-      "sources": {},
-      "source_state": "baseline-unavailable",
-      "review": {"status": "needs_review"},
-      "verification": {
-        "status": "not-run",
-        "conditions": "尚未选择验证环境",
-        "method": "未执行",
-        "observed": "无运行观察"
-      }
-    }
-  }
-}
-```
+缺少来源或历史摘要不能声称 unchanged。来源删除、指纹变化或引用集合减少需要复核。没有 claim 来源的页面为 unknown。symbol 的定位限制与业务复核分别表达。
 
-完成源码复核后，`sources` 应保存该页全部当前 claim 来源的真实摘要。
+source_checked_at 使用工具取得的实际时间并带时区。历史运行观察保留原版本和条件；指纹未变不能证明间接依赖、部署环境或当前运行行为未变。
 
-| 维度 | 取值 | 表达的事实 |
-|---|---|---|
-| 内容覆盖 | `navigation-only` / `documented` / `known-gap` | 已记录内容的深度或缺口，保存在 metadata |
-| 来源状态 | `unchanged` / `changed` / `broken` / `unknown` / `baseline-unavailable` | 直接引用文件与历史记录的比较结果 |
-| AI 复核 | `reviewed_by_ai` / `needs_review` | 是否对照目标源码分析过；已复核时必填带时区的 `reviewed_at` |
-| 行为验证 | `verified` / `failed` / `not-run` / `unavailable` | 指定条件下的验证记录；必填非空的 `conditions`、`method`、`observed` |
+## 验收记录
 
-可选 `source_checked_at` 保存实际来源检查时间，必须带时区。进度摘要注明记录时间与适用版本，缺少来源状态或时间时使用 `unknown`；历史复核和验证不能当作当前有效性判断。
+[review-schema.json](../assets/review-schema.json) 定义 `.reviews/*.json`，起始结构见[模板](../assets/review-template.json)。清单入口通过 reviews 引用当前记录；未引用的历史文件不能证明当前验收。源码答案只给评分者，阅读者不读取这些附件。
 
-check 派生来源状态的优先级为 `broken`、`changed`、`baseline-unavailable`、`unknown`、`unchanged`。摘要或来源集合变化，包括移除引用，会使页面需要复核；缺少来源或存在无法确认的 symbol 时也不能标为无需复核。没有当前 claim 来源、也没有移除引用记录的页面派生为 `unknown`。
+| 字段 | 内容 |
+|---|---|
+| id / target | 验收 ID、实际 commit 和工作区说明 |
+| sources / pages | 来源与 Markdown 页面分别保存实际 SHA-256，不用 commit 相同代替指纹 |
+| source_reviewed_at / reader | 实际源码复核时间；隔离条件 independent / unavailable 及说明 |
+| scenarios | id、entrypoints、topics、question、expected、reading、verdict、assessment、reviewed_at |
+| not_applicable | 按入口 ID、检查方面保存 reason 与 sources |
 
-check 的 `recorded_verification` 保留历史观察。来源文件未变不能证明间接依赖、部署环境或当前运行行为未变；四个状态维度分别表达，不汇总为可信度分数。
+检查方面为 normal / rejection / effective-time / partial-failure / repeat / async。由实际场景覆盖或提供源码支持的不适用理由，不固定题数；正常路径不能标不适用。
+
+expected 包含 answer 和 sources（path，可选 symbol / line）。reading 包含 status（pending / answered / unavailable）、answer、evidence（page + 实际 H2 section）、locations（源码 path + symbol 或 line）。verdict 为 pending / passed / failed，已判定时填写具体 assessment 与实际 reviewed_at。
+
+源码答案引用该入口的实现，来源必须存在于 snapshots 与清单。阅读依据引用已保存指纹的页面。场景关联的每个入口反向引用该记录，避免用其他业务的报告充当验收；accepted 入口的处理路径、claim 来源和关联页面都需被指纹覆盖。
+
+保存全部关联题，不能删去失败题或用其他通过题替代。修订后对同一题实际复验，更新阅读答案、判定与时间，在 assessment 保留原失败及修复说明；复验完成前仍为 failed / pending。源码复核时间不晚于评分时间；所有时间带时区且不得在未来。工具可用时用 `datetime.now(timezone.utc).isoformat()` 或宿主时钟取得实际时间，未知为 null。
+
+脚本核对范围、引用、隔离声明、答案字段、逐题结果、检查方面及快照，不判定答案真假。语义、隔离真实性和未发现分支仍由 Agent / 人工负责。变更及复验规则见[阅读验收](reading-review.md#变更后的有效性)。
 
 ## 保存复核结果
 
-`check` 和 `impact` 均只读，没有 record、baseline 或 fingerprint 子命令。以下保存过程仅用于 init / update；audit 的结果在本次报告中交付，不写回。Agent 在实际复核后更新状态：
+check / impact 均只读，没有写记录或推进基线的子命令。以下保存仅由 init / update 执行，audit 在答复交付结果：
 
-1. 保留旧指纹和关联，先完成候选分析与源码复核。状态损坏时保留 Markdown 和原状态，修复或按已确认来源重建。
-2. 收集已复核页面全部当前 claim 来源，计算原始字节 SHA-256，或采用刚执行的 check JSON 中的真实 `fingerprint`。
-3. 保存该页 `sources`、实际 `source_state` 和 `source_checked_at`。确实对照目标源码分析后，才写入 `reviewed_by_ai` 与实际 `reviewed_at`。
-4. 记录验证条件、方法和观察。未执行填 `not-run`，无法执行填 `unavailable`；旧结果保留原条件和版本范围。
-5. 未复核页面保留原记录。保存 JSON 时避免截断，不能把 check 的全部新摘要直接写成复核基线。
-6. 从旧基线到目标版本的全部变更完成归属和处置后，才推进 `baseline.commit`。局部复核保留旧 commit。
+1. 保留旧指纹和关联，先分析候选，复核源码与手册差异。状态损坏时保留知识，只按实际核对来源修复。
+2. 写清业务和 claim，计算对应来源与页面原始字节 SHA-256；验收快照应为阅读者实际读取的版本。
+3. 保存实际场景、阅读答案和逐题判定；失败题修订后独立复验，检查快照与时间。入口达到条件后才 accepted。
+4. 保存已复核页面 sources、source_state、source_checked_at。运行未执行为 not-run、无法执行为 unavailable，保留历史结果的条件。
+5. 未复核入口与记录保持原状，不将 check 的全部新摘要批量写成复核基线。核对清单派生进度后同步 README。
+6. 只有旧基线到目标的全部变更完成归属、处置与验收，才推进 baseline.commit。局部修订保留旧基线。
 
-页面指纹覆盖 claim 来源；清单指纹覆盖 Agent 已登记文件。未登记文件与遗漏依赖由 Agent 在更新和审计时补查。
+页面指纹覆盖 claim 来源，清单指纹覆盖已登记文件，验收指纹绑定实际题目与阅读版本。遗漏文件和依赖仍需 Agent 补查。
 
 ## Python CLI
 
-要求 Python 3.9+，仅使用标准库。`--root` 指向目标项目根目录，脚本可从任意目录调用：
+要求 Python 3.9+，仅用标准库，从安装目录运行：
 
 ```sh
-python3 <skill-directory>/scripts/handbook.py check --root .
-python3 <skill-directory>/scripts/handbook.py check --root . --format json
-python3 <skill-directory>/scripts/handbook.py impact --root . --base <commit> --target worktree
-python3 <skill-directory>/scripts/handbook.py impact --root . --base <commit> --target <commit>
+python3 <skill-directory>/scripts/handbook.py check --root <project-directory> --format json
+python3 <skill-directory>/scripts/handbook.py impact --root <project-directory> --base <commit> --target worktree --format json
 ```
 
-输出默认 text，可选 json。退出码 `0` 表示无机械错误，仍可能有 warning；`1` 表示机械错误；`2` 表示参数错误。业务语义、导航覆盖和行为验证需另行判断。
+check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、changed_files、unknown_files、related_units。单元状态从入口、缺口和证据派生。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
 
-check 检查 JSON 与 schema、布局、固定章节、ID、记录关系、链接、来源文件、支持的 symbol、状态和清单格式及已记录指纹；inventory 返回记录进度与来源变化后的实际待复核状态。
+impact 返回 changed_files、renames、direct_claims、previous_pages、related_modules、related_flows、related_units、related_entries、review_candidates、unowned_changes。根据 claim、范围、流程和清单依赖给候选；review_candidates 包含旧验收失效的入口，即使业务代码零 diff。
 
-impact 输出 `changed_files`、`renames`、`direct_claims`、`previous_pages`、`related_modules`、`related_flows`、`related_units`、`unowned_changes`。它按 claim 来源、module 范围、flow 参与关系和清单依赖生成候选；已归属或明确排除的清单文件不列入 unowned_changes。候选与未登记依赖仍需 Agent 判断实际影响。
+退出码 0 只表示无机械错误，仍可能有 warning 或未完成入口；1 为机械错误，2 为参数错误。标题、非空 claims、指纹一致、答案字段齐全和退出成功都不证明业务语义正确。
 
 ## impact 的比较范围
 
-| 条件 | 比较方式与限制 |
-|---|---|
-| Git 可用，有 `--base` 或 `baseline.commit` | 用该基线比较目标；默认 `worktree`，包含 tracked 暂存与未暂存变化、非忽略 untracked 文件 |
-| 指定目标 commit | 比较两个版本，不包含脏工作区和 untracked 文件 |
-| 无 Git，或未提供 commit 基线 | 比较状态与清单中的来源指纹；只能识别记录文件的修改或删除 |
-| 缺少旧指纹 | `baseline-unavailable`；无法得出无变化的结论 |
-| 显式 ref 无效，或缺少执行 ref 比较的条件 | 报错，不静默降级 |
+Git 可用且有显式 base 或 baseline.commit 时比较该基线；默认 worktree 包含暂存、未暂存和非忽略 untracked 文件。指定目标 commit 时排除工作区变化，显式 ref 无效则报错，不静默降级。Git 根目录必须等于 root，metadata 始终取当前 worktree，比较历史目标前确认关联适用。
 
-Git 根目录必须等于 `--root`。关联 metadata 始终读取当前 worktree 的 Handbook；比较历史目标时需先确认这些关联适用。
+无 Git 或无 commit 基线时比较状态与清单历史指纹，只能发现已记录文件修改/删除，无法发现未登记文件、完整改名关系或遗漏依赖。缺旧摘要为 baseline-unavailable。改名保留旧新路径；删除页面或 claim 后仍利用旧 state 定位候选。
 
-改名保留旧、新路径，删除 claim 或页面后仍可通过旧状态的 `previous_pages` 找到候选。`.smart-handbook/` 自身的修改不列入实现变更。
+手册自身改动不列入业务源码 changed_files；验收的页面快照变化单独给出 review_candidates。候选仍由 Agent 核对实际影响，代码未变不免除已发现手册问题的修订。
 
-指纹降级无法发现未登记文件、完整改名关系或遗漏依赖；已登记文件变化可沿清单依赖进入候选。工具不生成全库入口清单或自动依赖图。
-
-Python 不可用或版本不足时，手工完成当前工作流所需检查并记录 `automated check unavailable`；源码分析和知识维护可继续。
+Python 不可用时手工检查并记录 automated check unavailable；Git 不可用时说明指纹降级边界。源码分析和知识维护可以继续。
