@@ -1,5 +1,5 @@
 ---
-description: Build or explicitly rebuild project knowledge in .smart-handbook/.
+description: Build, resume, or explicitly rebuild a full project handbook in .smart-handbook/.
 argument-hint: "[目标仓库或范围]"
 disable-model-invocation: true
 ---

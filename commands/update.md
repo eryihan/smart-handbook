@@ -1,6 +1,6 @@
 ---
-description: Review source changes and update affected handbook pages.
-argument-hint: "[变更基线、目标版本或范围]"
+description: Update handbook pages from source changes or confirmed documentation issues.
+argument-hint: "[变更基线、目标版本、范围或审计问题]"
 disable-model-invocation: true
 ---
 
