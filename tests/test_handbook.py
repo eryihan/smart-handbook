@@ -51,6 +51,23 @@ class HandbookTest(unittest.TestCase):
             "review": {"status": "reviewed_by_ai", "reviewed_at": "2026-10-01T10:00:00Z"},
             "verification": {"status": "not-run", "conditions": "fixture only", "method": "none", "observed": "not executed"}}}}
         self.save_state()
+        pending_review = {"status": "pending", "reviewed_at": None, "scope": "fixture", "result": "not reviewed"}
+        self.inventory = {
+            "schema_version": 1, "mode": "full", "status": "in-progress",
+            "target": {"commit": None, "worktree": "fixture", "recorded_at": "2026-10-02T10:00:00+08:00"},
+            "scope": {"include": ["src", "config"], "exclude": []},
+            "discovery": {"checked": ["src", "config"], "methods": ["fixture declarations"], "remaining": []},
+            "files": [{"path": path, "fingerprint": hb.fingerprint(self.root / path),
+                       "role": "fixture implementation", "units": ["business-approval"],
+                       "disposition": "assigned", "reason": ""}
+                      for path in (self.source, "config/application.yml")],
+            "units": [{"id": "business-approval", "name": "审批", "status": "needs-review",
+                       "entrypoints": [{"path": self.source, "symbol": "ApprovalService#approve(String)",
+                                        "trigger": "fixture API"}],
+                       "pages": [self.module, self.flow], "sources": [self.source, "config/application.yml"],
+                       "depends_on": [], "gaps": [],
+                       "review": {"source": dict(pending_review), "reading": dict(pending_review)}}]}
+        self.save_inventory()
 
     def change_meta(self, rel, **updates):
         path = self.root / rel
@@ -62,6 +79,96 @@ class HandbookTest(unittest.TestCase):
 
     def save_state(self):
         (self.root / ".smart-handbook/.state.json").write_text(json.dumps(self.state))
+
+    def save_inventory(self):
+        (self.root / ".smart-handbook/.inventory.json").write_text(json.dumps(self.inventory))
+
+    def test_inventory_is_required_and_invalid_json_is_read_only(self):
+        path = self.root / ".smart-handbook/.inventory.json"
+        path.unlink()
+        self.assertIn("inventory-missing", self.codes(self.check()))
+        path.write_text("{broken")
+        before = (self.root / self.module).read_bytes()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        self.assertEqual(path.read_text(), "{broken")
+        self.assertEqual((self.root / self.module).read_bytes(), before)
+
+    def test_inventory_completion_requires_both_reviews(self):
+        self.inventory["status"] = "complete"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        unit = self.inventory["units"][0]
+        unit["status"] = "accepted"
+        for review in unit["review"].values():
+            review.update(status="passed", reviewed_at="2026-10-02T10:00:00+08:00", result="synthetic fixture only")
+        self.save_inventory()
+        self.assertFalse(self.check()["issues"])
+        unit["review"]["reading"]["status"] = "unavailable"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_inventory_rejects_pending_discovery_and_unknown_owners(self):
+        self.inventory["mode"] = "navigation"
+        self.inventory["status"] = "complete"
+        self.inventory["discovery"]["remaining"] = ["dynamic registration not read"]
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        self.inventory["status"] = "in-progress"
+        self.inventory["files"][0]["units"] = ["missing-unit"]
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_inventory_allows_agent_roles_and_project_extensions(self):
+        self.inventory["files"][0]["role"] = "project-specific generated dispatcher"
+        self.inventory["units"][0]["project_note"] = "Agent decides domain boundaries"
+        self.save_inventory()
+        self.assertFalse(self.check()["issues"])
+
+    def test_inventory_changed_shared_config_finds_transitive_units_with_cycle(self):
+        shared = json.loads(json.dumps(self.inventory["units"][0]))
+        shared.update(id="shared-policy", name="公共规则", entrypoints=[], pages=[self.module],
+                      sources=["config/application.yml"], depends_on=["business-approval"])
+        self.inventory["units"].append(shared)
+        self.inventory["units"][0]["depends_on"] = ["shared-policy"]
+        self.inventory["files"][1]["units"].append("shared-policy")
+        self.save_inventory()
+        before = (self.root / ".smart-handbook/.inventory.json").read_bytes()
+        (self.root / "config/application.yml").write_text("approval: false\n")
+        result = self.check()
+        self.assertIn("inventory-source-changed", self.codes(result))
+        self.assertEqual(result["pages"][self.module]["source_state"], "unchanged")
+        self.assertEqual(result["pages"][self.module]["review"], "needs_review")
+        self.assertEqual({unit["id"] for unit in result["inventory"]["related_units"]},
+                         {"business-approval", "shared-policy"})
+        impact = hb.impact(hb.Handbook(self.root))
+        self.assertIn("config/application.yml", impact["changed_files"])
+        self.assertEqual({unit["id"] for unit in impact["related_units"]},
+                         {"business-approval", "shared-policy"})
+        self.assertEqual(before, (self.root / ".smart-handbook/.inventory.json").read_bytes())
+
+    def test_inventory_scope_and_entries_cannot_escape_repository(self):
+        self.inventory["scope"]["include"] = ["../outside"]
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+        self.inventory["scope"]["include"] = ["src"]
+        self.inventory["units"][0]["entrypoints"][0]["path"] = "/etc/hosts"
+        self.save_inventory()
+        self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_completed_inventory_becomes_incomplete_when_source_changes(self):
+        self.inventory["status"] = "complete"
+        self.inventory["units"][0]["status"] = "accepted"
+        for review in self.inventory["units"][0]["review"].values():
+            review.update(status="passed", reviewed_at="2026-10-02T10:00:00+08:00", result="synthetic fixture only")
+        self.save_inventory()
+        path = self.root / ".smart-handbook/.inventory.json"
+        before = path.read_bytes()
+        (self.root / "config/application.yml").write_text("approval: false\n")
+        result = self.check()
+        self.assertEqual(result["inventory"]["recorded_status"], "complete")
+        self.assertEqual(result["inventory"]["status"], "incomplete")
+        self.assertEqual(result["pages"][self.module]["review"], "needs_review")
+        self.assertEqual(before, path.read_bytes())
 
     def check(self):
         return hb.Handbook(self.root).check()
@@ -87,6 +194,26 @@ class HandbookTest(unittest.TestCase):
         self.assertEqual(page["review"], "reviewed_by_ai")
         self.assertEqual(page["recorded_verification"]["status"], "not-run")
         self.assertEqual(before, (self.root / ".smart-handbook/.state.json").read_bytes())
+
+    def test_documented_module_without_claims_requires_content_review(self):
+        self.change_meta(self.module, claims=[])
+        before = (self.root / ".smart-handbook/.state.json").read_bytes()
+        result = self.check()
+        self.assertIn("documented-without-claims", self.codes(result))
+        self.assertEqual(result["pages"][self.module]["review"], "needs_review")
+        self.assertEqual(before, (self.root / ".smart-handbook/.state.json").read_bytes())
+
+    def test_documented_flow_without_claims_warns_but_navigation_does_not(self):
+        self.change_meta(self.flow, coverage="documented")
+        warnings = [issue for issue in self.check()["issues"]
+                    if issue["code"] == "documented-without-claims"]
+        self.assertEqual([issue["path"] for issue in warnings], [self.flow])
+        self.change_meta(self.flow, coverage="navigation-only")
+        self.assertNotIn("documented-without-claims", self.codes(self.check()))
+
+    def test_documented_working_guide_does_not_need_behavior_claims(self):
+        self.change_meta(".smart-handbook/working-guide.md", coverage="documented")
+        self.assertNotIn("documented-without-claims", self.codes(self.check()))
 
     def test_hidden_directory_is_required_no_legacy_fallback(self):
         for old_name in ("handbook", ".smart_handbook"):
@@ -115,6 +242,37 @@ class HandbookTest(unittest.TestCase):
         page = self.check()["pages"][self.module]
         self.assertEqual(page["source_state"], "changed")
         self.assertEqual(page["review"], "needs_review")
+
+    def test_implementation_sql_and_config_changes_without_interface_change(self):
+        implementation = "src/ApprovalServiceImpl.java"
+        sql = "src/ApprovalMapper.xml"
+        config = "config/application.yml"
+        (self.root / implementation).write_text("class ApprovalServiceImpl {}\n")
+        (self.root / sql).write_text("<mapper><update id='approve'>UPDATE approval SET status=1</update></mapper>\n")
+        self.change_meta(self.module, claims=[{
+            "id": "approval-01", "section": "当前行为与关键约束",
+            "sources": [{"path": path} for path in (self.source, implementation, sql, config)]}])
+        self.state["pages"][self.module]["sources"] = {
+            path: hb.fingerprint(self.root / path) for path in (self.source, implementation, sql, config)}
+        self.save_state()
+        interface_before = (self.root / self.source).read_bytes()
+        for dependency in (implementation, sql, config):
+            with self.subTest(dependency=dependency):
+                target = self.root / dependency
+                before = target.read_bytes()
+                target.write_bytes(before + b"\nchanged\n")
+                try:
+                    page = self.check()["pages"][self.module]
+                    self.assertEqual(page["source_state"], "changed")
+                    self.assertEqual(page["review"], "needs_review")
+                    self.assertEqual(page["sources"][self.source]["status"], "unchanged")
+                    impact = hb.impact(hb.Handbook(self.root))
+                    self.assertEqual(impact["changed_files"], [dependency])
+                    self.assertEqual(impact["related_modules"], [{"id": "module-approval", "page": self.module}])
+                    self.assertEqual(impact["related_flows"], [{"id": "flow-approval", "page": self.flow}])
+                finally:
+                    target.write_bytes(before)
+        self.assertEqual(interface_before, (self.root / self.source).read_bytes())
 
     def test_file_deleted(self):
         (self.root / self.source).unlink()
@@ -296,9 +454,22 @@ class HandbookTest(unittest.TestCase):
 
     def test_no_git_no_baseline(self):
         (self.root / ".smart-handbook/.state.json").unlink()
+        for item in self.inventory["files"]:
+            item.update(fingerprint=None, reason="No historical fingerprint")
+        self.save_inventory()
         result = hb.impact(hb.Handbook(self.root))
         self.assertEqual(result["baseline_status"], "baseline-unavailable")
         self.assertEqual(result["changed_files"], [])
+
+    def test_inventory_fingerprints_remain_available_without_page_state(self):
+        (self.root / ".smart-handbook/.state.json").unlink()
+        self.change_meta(self.module, config_ranges=[])
+        (self.root / "config/application.yml").write_text("approval: false\n")
+        result = hb.impact(hb.Handbook(self.root))
+        self.assertEqual(result["baseline_status"], "available")
+        self.assertEqual(result["changed_files"], ["config/application.yml"])
+        self.assertEqual(result["unowned_changes"], [])
+        self.assertEqual(result["related_units"], [{"id": "business-approval", "pages": [self.module, self.flow]}])
 
     def test_old_state_locates_removed_claim(self):
         self.change_meta(self.module, claims=[], source_ranges=[])

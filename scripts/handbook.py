@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlsplit
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 HANDBOOK_DIR = ".smart-handbook"
 STATE_PATH = HANDBOOK_DIR + "/.state.json"
+INVENTORY_PATH = HANDBOOK_DIR + "/.inventory.json"
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 META_RE = re.compile(r"<!--\s*handbook-meta\b([\s\S]*?)-->")
 ROOT_KINDS = {"README.md": "readme", "system.md": "system", "map.md": "map",
@@ -46,7 +47,7 @@ def parse_json(text):
 
 
 def validate(value, schema, document, location="$", errors=None):
-    """Validate the subset of JSON Schema used by our two bundled schemas."""
+    """Validate the subset of JSON Schema used by the bundled schemas."""
     if errors is None:
         errors = []
     if "$ref" in schema:
@@ -231,8 +232,10 @@ class Handbook:
         self.issues, self.pages = [], {}
         self.state = {"schema_version": 1, "pages": {}}
         self.state_available = False
+        self.inventory = None
         self.metadata_schema = parse_json((ASSETS / "metadata-schema.json").read_text())
         self.state_schema = parse_json((ASSETS / "state-schema.json").read_text())
+        self.inventory_schema = parse_json((ASSETS / "inventory-schema.json").read_text())
         self.load()
 
     def issue(self, level, code, path, message):
@@ -302,6 +305,106 @@ class Handbook:
                 self.state, self.state_available = state, True
             except (OSError, UnicodeError, ValueError) as exc:
                 self.issue("error", "state-invalid", STATE_PATH, str(exc))
+        try:
+            inventory_path = safe_path(self.root, INVENTORY_PATH)
+            if not inventory_path.is_file():
+                self.issue("error", "inventory-missing", INVENTORY_PATH, "Agent-authored inventory is required")
+            else:
+                inventory = parse_json(inventory_path.read_text(encoding="utf-8"))
+                errors = validate(inventory, self.inventory_schema, self.inventory_schema)
+                if errors:
+                    raise ValueError("; ".join(errors))
+                self.validate_inventory_relations(inventory)
+                self.inventory = inventory
+        except (OSError, UnicodeError, ValueError) as exc:
+            self.issue("error", "inventory-invalid", INVENTORY_PATH, str(exc))
+
+    def validate_inventory_relations(self, inventory):
+        """Check Agent-recorded structure, never discover or classify source code."""
+        files = {item["path"]: item for item in inventory["files"]}
+        units = {item["id"]: item for item in inventory["units"]}
+        if len(files) != len(inventory["files"]) or len(units) != len(inventory["units"]):
+            raise ValueError("Duplicate inventory file path or unit ID")
+        for scope in inventory["scope"]["include"]:
+            if scope != ".":
+                safe_path(self.root, scope)
+        for item in inventory["scope"]["exclude"]:
+            relative = item["path"]
+            if (PurePosixPath(relative).is_absolute() or ".." in PurePosixPath(relative).parts
+                    or "\\" in relative or relative.startswith("./")):
+                raise ValueError("Invalid excluded path: " + relative)
+        for item in files.values():
+            safe_path(self.root, item["path"])
+            if set(item["units"]) - units.keys():
+                raise ValueError("Unknown file owner: " + item["path"])
+            if item["fingerprint"] is None and not item["reason"].strip():
+                raise ValueError("Missing fingerprint requires a reason: " + item["path"])
+        for unit in units.values():
+            if set(unit["depends_on"]) - units.keys():
+                raise ValueError("Unknown unit dependency: " + unit["id"])
+            for source in unit["sources"] + [entry["path"] for entry in unit["entrypoints"]]:
+                safe_path(self.root, source)
+                if source not in files or unit["id"] not in files[source]["units"]:
+                    raise ValueError("Source or entry is not assigned to unit: " + unit["id"] + ": " + source)
+            for page in unit["pages"]:
+                safe_path(self.root, page)
+                if page not in self.pages:
+                    raise ValueError("Unknown unit page: " + unit["id"] + ": " + page)
+            if unit["status"] == "accepted" and (unit["gaps"] or not unit["pages"] or not unit["sources"]
+                    or any(unit["review"][kind]["status"] != "passed" for kind in ("source", "reading"))):
+                raise ValueError("Accepted unit requires sources, pages, no gaps and both reviews: " + unit["id"])
+            if unit["status"] == "accepted" and not any(
+                    self.pages[page]["metadata"]["kind"] in ("module", "flow")
+                    and self.pages[page]["metadata"]["coverage"] == "documented"
+                    and self.pages[page]["metadata"]["claims"] for page in unit["pages"]):
+                raise ValueError("Accepted unit requires a documented module/flow with claims: " + unit["id"])
+        if inventory["status"] == "complete":
+            if not inventory["discovery"]["checked"] or not inventory["discovery"]["methods"]:
+                raise ValueError("Complete inventory requires discovery records")
+            if inventory["discovery"]["remaining"] or any(item["disposition"] == "pending" for item in files.values()):
+                raise ValueError("Complete inventory has pending discovery or files")
+            if inventory["mode"] == "full" and any(unit["status"] != "accepted" for unit in units.values()):
+                raise ValueError("Full completion requires every unit to be accepted")
+
+    def inventory_candidates(self, changed):
+        """Follow only dependencies recorded by the Agent; return review candidates."""
+        if self.inventory is None:
+            return []
+        units = self.inventory["units"]
+        affected = {unit["id"] for unit in units if set(unit["sources"]) & changed}
+        for item in self.inventory["files"]:
+            if item["path"] in changed:
+                affected.update(item["units"])
+        while True:
+            expanded = affected | {unit["id"] for unit in units if set(unit["depends_on"]) & affected}
+            if expanded == affected:
+                break
+            affected = expanded
+        return [{"id": unit["id"], "pages": unit["pages"]} for unit in units if unit["id"] in affected]
+
+    def check_inventory_sources(self):
+        if self.inventory is None:
+            return {"status": "unavailable"}
+        changed, unknown = set(), set()
+        for item in self.inventory["files"]:
+            if item["disposition"] == "excluded":
+                continue
+            try:
+                path = safe_path(self.root, item["path"])
+                if not path.is_file() or (item["fingerprint"] is not None and fingerprint(path) != item["fingerprint"]):
+                    changed.add(item["path"])
+                elif item["fingerprint"] is None:
+                    unknown.add(item["path"])
+            except (OSError, ValueError):
+                unknown.add(item["path"])
+        for code, paths in (("inventory-source-changed", changed), ("inventory-source-unknown", unknown)):
+            for path in sorted(paths):
+                self.issue("warning", code, INVENTORY_PATH, path)
+        recorded = self.inventory["status"]
+        return {"mode": self.inventory["mode"], "recorded_status": recorded,
+                "status": "incomplete" if (changed or unknown) and recorded == "complete" else recorded,
+                "changed_files": sorted(changed), "unknown_files": sorted(unknown),
+                "related_units": self.inventory_candidates(changed | unknown)}
 
     def current_sources(self, page):
         return {source["path"] for claim in page["metadata"]["claims"] for source in claim["sources"]}
@@ -381,9 +484,17 @@ class Handbook:
 
     def check(self):
         self.check_relations()
+        inventory = self.check_inventory_sources()
+        affected_pages = {page for unit in inventory.get("related_units", []) for page in unit["pages"]}
         states = {}
         for rel, page in self.pages.items():
             self.check_links(rel, page)
+            undocumented = (page["metadata"]["kind"] in ("module", "flow")
+                            and page["metadata"]["coverage"] == "documented"
+                            and not page["metadata"]["claims"])
+            if undocumented:
+                self.issue("warning", "documented-without-claims", rel,
+                           "Documented module/flow has no implementation claims; content review is required")
             current = self.current_sources(page)
             recorded = self.state["pages"].get(rel, {})
             previous = recorded.get("sources", {})
@@ -424,7 +535,7 @@ class Handbook:
             else:
                 state = "unchanged"
             review = recorded.get("review", {}).get("status", "needs_review")
-            if state != "unchanged":
+            if state != "unchanged" or undocumented or rel in affected_pages:
                 review = "needs_review"
             states[rel] = {"id": page["metadata"]["id"], "coverage": page["metadata"]["coverage"],
                            "source_state": state, "sources": source_results,
@@ -432,11 +543,12 @@ class Handbook:
                            "recorded_verification": recorded.get("verification", {"status": "not-run"})}
         for rel in sorted(self.state["pages"].keys() - self.pages.keys()):
             self.issue("warning", "state-page-stale", rel, "Recorded page is missing or invalid; retain state for impact review")
-        return {"command": "check", "pages": states, "issues": self.issues,
+        return {"command": "check", "pages": states, "inventory": inventory, "issues": self.issues,
                 "read_only": True,
                 "limits": ["No business semantics or runtime verification is performed.",
                            "Unchanged fingerprints cover directly recorded files only.",
-                           "Java symbol location is a conservative textual check; unsupported syntax remains unverified."]}
+                           "Java symbol location is a conservative textual check; unsupported syntax remains unverified.",
+                           "Inventory discovery, ownership and review truth require Agent assessment; no source scan is performed."]}
 
 
 def git(root, *arguments):
@@ -476,7 +588,7 @@ def impact(book, base=None, target=None):
     result = {"command": "impact", "candidate_only": True, "read_only": True,
               "changed_files": [], "renames": [], "direct_claims": [],
               "previous_pages": [], "related_modules": [], "related_flows": [],
-              "unowned_changes": [], "issues": book.issues,
+              "unowned_changes": [], "related_units": [], "issues": book.issues,
               "metadata_version": "current-worktree",
               "limits": ["Candidates need AI source review; indirect dependencies can require wider analysis."]}
     changed, available = set(), False
@@ -519,8 +631,19 @@ def impact(book, base=None, target=None):
                         changed.add(source)
                 except (OSError, ValueError):
                     changed.add(source)
+        if book.inventory is not None:
+            for item in book.inventory["files"]:
+                if item["disposition"] == "excluded" or item["fingerprint"] is None:
+                    continue
+                count += 1
+                try:
+                    path = safe_path(book.root, item["path"])
+                    if not path.is_file() or fingerprint(path) != item["fingerprint"]:
+                        changed.add(item["path"])
+                except (OSError, ValueError):
+                    changed.add(item["path"])
         result.update({"mode": "fingerprint", "baseline_status": "available" if count else "baseline-unavailable"})
-        result["limits"].append("Fingerprint mode cannot discover new or unreferenced files, renames, or indirect dependencies.")
+        result["limits"].append("Fingerprint mode cannot discover unrecorded files, renames, or unrecorded dependencies.")
         if not count:
             book.issue("warning", "baseline-unavailable", STATE_PATH, "No historical source fingerprints")
     # Handbook edits are not implementation changes; state retains old associations.
@@ -570,18 +693,23 @@ def impact(book, base=None, target=None):
         if meta["kind"] == "module" and meta["id"] in touched_modules:
             result["related_modules"].append({"id": meta["id"], "page": rel})
     result["changed_files"] = sorted(changed)
+    if book.inventory is not None:
+        covered.update(item["path"] for item in book.inventory["files"]
+                       if item["disposition"] in ("assigned", "excluded"))
     result["unowned_changes"] = sorted(changed - covered)
+    result["related_units"] = book.inventory_candidates(changed)
     return result
 
 
 def render(result):
     rows = [result["command"] + (" (candidate impact only)" if result["command"] == "impact" else " (mechanical checks only)")]
     if result["command"] == "check":
+        rows.append("Inventory: " + json.dumps(result["inventory"], ensure_ascii=False))
         for path, page in result["pages"].items():
             rows.append(path + ": " + page["coverage"] + " / " + page["source_state"] + " / " + page["review"])
     else:
         rows.append("Mode: " + result["mode"] + "; baseline: " + result["baseline_status"])
-        for key in ("changed_files", "direct_claims", "previous_pages", "related_modules", "related_flows", "unowned_changes"):
+        for key in ("changed_files", "direct_claims", "previous_pages", "related_modules", "related_flows", "related_units", "unowned_changes"):
             rows.append(key + ": " + json.dumps(result[key], ensure_ascii=False))
     for issue in result["issues"]:
         rows.append(issue["level"] + " " + issue["code"] + " " + issue["path"] + ": " + issue["message"])
