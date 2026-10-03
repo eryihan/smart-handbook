@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, standard-library checks and candidate impact for Handbook V2."""
+"""Read-only, standard-library checks and candidate impact for Handbook V3."""
 
 import argparse
 import hashlib
@@ -51,6 +51,16 @@ def parse_json(text):
         raise ValueError("non-JSON constant: " + value)
     return json.loads(text, object_pairs_hook=unique_object,
                       parse_constant=invalid_constant)
+
+
+def review_input_fingerprint(record):
+    """Bind source review to the questions, answers, exclusions and read versions."""
+    value = {key: record[key] for key in ("target", "sources", "pages", "not_applicable")}
+    value["scenarios"] = [{key: case[key] for key in
+                            ("id", "entrypoints", "topics", "question", "expected")}
+                           for case in record["scenarios"]]
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def validate(value, schema, document, location="$", errors=None):
@@ -240,7 +250,7 @@ class Handbook:
     def __init__(self, root):
         self.root = root.resolve()
         self.issues, self.pages = [], {}
-        self.state = {"schema_version": 2, "pages": {}}
+        self.state = {"schema_version": 3, "pages": {}}
         self.state_available = False
         self.inventory = None
         self.entries, self.claims, self.reviews = {}, {}, {}
@@ -356,6 +366,8 @@ class Handbook:
                 raise ValueError("Invalid excluded path: " + relative)
         for item in files.values():
             safe_path(self.root, item["path"])
+            if item["path"].startswith(HANDBOOK_DIR + "/"):
+                raise ValueError("Handbook output cannot be inventoried as source: " + item["path"])
             if set(item["units"]) - units.keys():
                 raise ValueError("Unknown file owner: " + item["path"])
             if item["fingerprint"] is None and not item["reason"].strip():
@@ -437,6 +449,20 @@ class Handbook:
                 self.issue("error", "review-invalid", rel, str(exc))
 
     def validate_review_relations(self, rel, record):
+        proof = record["source_review"]
+        draft = (proof["status"] == "pending" and record["prepared_at"] is None
+                 and record["source_reviewed_at"] is None
+                 and all(s["verdict"] == "pending" and s["reading"]["status"] == "pending"
+                         and not s["reading"]["answer"] and not s["reading"]["evidence"]
+                         and not s["reading"]["locations"] for s in record["scenarios"]))
+        if proof["status"] == "passed":
+            if (proof["isolation"] != "independent" or proof["findings"]
+                    or proof["input_fingerprint"] != review_input_fingerprint(record)
+                    or not record["prepared_at"] or not record["source_reviewed_at"]):
+                raise ValueError("Source review requires independent, resolved, fingerprinted evidence")
+        if record["source_reviewed_at"]:
+            if not record["prepared_at"] or datetime.fromisoformat(record["prepared_at"].replace("Z", "+00:00")) > datetime.fromisoformat(record["source_reviewed_at"].replace("Z", "+00:00")):
+                raise ValueError("Source review predates preparation")
         snapshots = record["sources"]
         files = {item["path"] for item in self.inventory["files"]}
         for path in snapshots:
@@ -451,7 +477,11 @@ class Handbook:
         def source_refs(refs):
             for source in refs:
                 safe_path(self.root, source["path"])
+                if source["path"] not in files or source["path"].startswith(HANDBOOK_DIR + "/"):
+                    raise ValueError("Expected source is not inventoried implementation: " + source["path"])
                 if source["path"] not in snapshots:
+                    if draft:
+                        continue  # Draft questions are planned before prepare computes their snapshots.
                     raise ValueError("Expected source is not fingerprinted: " + source["path"])
                 self.validate_snapshot_locator(source, snapshots[source["path"]])
 
@@ -483,7 +513,7 @@ class Handbook:
                 if datetime.fromisoformat(scenario["reviewed_at"].replace("Z", "+00:00")) < datetime.fromisoformat(record["source_reviewed_at"].replace("Z", "+00:00")):
                     raise ValueError("Reading verdict predates source questions")
             if scenario["verdict"] == "passed":
-                if (record["reader"]["isolation"] != "independent" or scenario["reading"]["status"] != "answered"
+                if (proof["status"] != "passed" or record["reader"]["isolation"] != "independent" or scenario["reading"]["status"] != "answered"
                         or not scenario["reading"]["answer"].strip() or not scenario["expected"]["answer"].strip()
                         or not scenario["expected"]["sources"] or not scenario["reading"]["evidence"]
                         or not scenario["reading"]["locations"]):
@@ -531,7 +561,7 @@ class Handbook:
                     missing.append("every scoped scenario must pass")
                 if topics != REVIEW_TOPICS:
                     missing.append("missing scenario topics: " + ", ".join(sorted(REVIEW_TOPICS - topics)))
-                if len(records) != len(entry["reviews"]) or any(r["source_reviewed_at"] is None or r["reader"]["isolation"] != "independent" for r in records):
+                if len(records) != len(entry["reviews"]) or any(r["source_review"]["status"] != "passed" or r["source_reviewed_at"] is None or r["reader"]["isolation"] != "independent" for r in records):
                     missing.append("independent source/reading records are unavailable")
                 snap_sources = {p for r in records for p in r["sources"]}
                 snap_pages = {p for r in records for p in r["pages"]}
@@ -555,14 +585,18 @@ class Handbook:
         if self.inventory:
             for unit in self.inventory["units"]:
                 statuses = [states[e["id"]]["status"] for e in unit["entrypoints"]]
-                supported = bool(unit["sources"]) and set(unit["sources"]) <= verified_sources
+                # Entry evidence is already authoritative; do not require duplicating it in unit.sources.
+                sources = set(unit["sources"]) | {e["path"] for e in unit["entrypoints"]}
+                sources.update(s["path"] for e in unit["entrypoints"] for c in e["claims"]
+                               for s in self.claims[c][1]["sources"])
+                supported = bool(sources) and sources <= verified_sources
                 if unit["gaps"] or "known-gap" in statuses:
                     status = "known-gap"
                 elif supported and all(s == "accepted" for s in statuses):
                     status = "accepted"
                 elif "analysing" in statuses:
                     status = "analysing"
-                elif not statuses or "needs-review" in statuses:
+                elif not statuses or "needs-review" in statuses or all(s == "accepted" for s in statuses):
                     status = "needs-review"
                 else:
                     status = "pending"
@@ -625,6 +659,7 @@ class Handbook:
         return {"mode": self.inventory["mode"], "recorded_status": recorded,
                 "status": "incomplete" if not ready and recorded == "complete" else recorded,
                 "ready_to_complete": bool(ready), "entries": entries, "units": units,
+                "next_entries": [entry_id for entry_id, value in entries.items() if value["status"] != "accepted"],
                 "changed_files": sorted(changed), "unknown_files": sorted(unknown),
                 "related_units": related}
 

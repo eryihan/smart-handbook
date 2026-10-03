@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Handbook source-backed reading review V2",
+  "title": "Handbook source-backed reading review V3",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,11 +12,13 @@
     "source_reviewed_at",
     "reader",
     "scenarios",
-    "not_applicable"
+    "not_applicable",
+    "prepared_at",
+    "source_review"
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "id": {
       "$ref": "#/$defs/id"
@@ -84,6 +86,56 @@
         "type": "object",
         "additionalProperties": {
           "$ref": "#/$defs/not_applicable"
+        }
+      }
+    },
+    "prepared_at": {
+      "$ref": "#/$defs/time"
+    },
+    "source_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "isolation",
+        "description",
+        "input_fingerprint",
+        "findings"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "passed",
+            "failed",
+            "unavailable"
+          ]
+        },
+        "isolation": {
+          "enum": [
+            "independent",
+            "unavailable"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "input_fingerprint": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "const": null
+            }
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/text"
+          }
         }
       }
     }

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "review-example",
   "target": {
     "commit": null,
@@ -13,5 +13,13 @@
     "description": "尚未安排独立阅读"
   },
   "scenarios": [],
-  "not_applicable": {}
+  "not_applicable": {},
+  "prepared_at": null,
+  "source_review": {
+    "status": "pending",
+    "isolation": "unavailable",
+    "description": "尚未独立核对源码答案与不适用理由",
+    "input_fingerprint": null,
+    "findings": []
+  }
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "mode": "full",
   "status": "in-progress",
   "target": {
@@ -11,7 +11,12 @@
     "include": [
       "."
     ],
-    "exclude": []
+    "exclude": [
+      {
+        "path": ".smart-handbook",
+        "reason": "手册产物，不属于业务源码清单"
+      }
+    ]
   },
   "discovery": {
     "checked": [],

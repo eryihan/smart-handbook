@@ -46,12 +46,12 @@ class HandbookTest(unittest.TestCase):
         self.change_meta(".smart-handbook/map.md", modules=[{
             "id": "module-approval", "page": self.module, "keywords": ["审批", "数据未生效"],
             "source_ranges": ["src"], "config_ranges": ["config"]}])
-        self.state = {"schema_version": 2, "pages": {self.module: {
+        self.state = {"schema_version": 3, "pages": {self.module: {
             "sources": {self.source: hb.fingerprint(self.root / self.source)},
             "verification": {"status": "not-run", "conditions": "fixture only", "method": "none", "observed": "not executed"}}}}
         self.save_state()
         self.inventory = {
-            "schema_version": 2, "mode": "full", "status": "in-progress",
+            "schema_version": 3, "mode": "full", "status": "in-progress",
             "target": {"commit": None, "worktree": "fixture", "recorded_at": "2026-10-02T10:00:00+08:00"},
             "scope": {"include": ["src", "config"], "exclude": []},
             "discovery": {"checked": ["src", "config"], "methods": ["fixture declarations"], "remaining": []},
@@ -68,9 +68,12 @@ class HandbookTest(unittest.TestCase):
         self.save_inventory()
         self.review_path = ".smart-handbook/.reviews/approval.json"
         self.record = {
-            "schema_version": 2, "id": "review-approval", "target": {"commit": None, "worktree": "synthetic fixture"},
+            "schema_version": 3, "id": "review-approval", "target": {"commit": None, "worktree": "synthetic fixture"},
             "sources": {self.source: hb.fingerprint(self.root / self.source)},
             "pages": {self.module: hb.fingerprint(self.root / self.module)},
+            "prepared_at": "2026-10-01T09:59:00Z",
+            "source_review": {"status": "passed", "isolation": "independent", "description": "synthetic source-review fixture",
+                              "input_fingerprint": None, "findings": []},
             "source_reviewed_at": "2026-10-01T10:00:00Z",
             "reader": {"isolation": "independent", "description": "synthetic record, no real AI reading"},
             "scenarios": [{"id": "approve-normal", "entrypoints": ["approve"], "topics": ["normal"],
@@ -84,7 +87,10 @@ class HandbookTest(unittest.TestCase):
                 for topic in hb.REVIEW_TOPICS - {"normal"}}}}
         self.save_review()
 
-    def save_review(self):
+    def save_review(self, refresh_proof=True):
+        # Synthetic fixtures explicitly simulate a new source review; this is not AI acceptance.
+        if refresh_proof:
+            self.record["source_review"]["input_fingerprint"] = hb.review_input_fingerprint(self.record)
         path = self.root / self.review_path
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(self.record))
@@ -539,26 +545,26 @@ class HandbookTest(unittest.TestCase):
         self.assertEqual(before, (self.root / self.module).read_bytes())
 
     def test_state_schema_version_and_digest(self):
-        self.state["schema_version"] = 3
+        self.state["schema_version"] = 4
         self.save_state()
         self.assertIn("state-invalid", self.codes(self.check()))
-        self.state["schema_version"] = 2
+        self.state["schema_version"] = 3
         self.state["pages"][self.module]["sources"][self.source] = "sha256:abc"
         self.save_state()
         self.assertIn("state-invalid", self.codes(self.check()))
 
     def test_bad_metadata_json(self):
         path = self.root / self.module
-        path.write_text(path.read_text().replace('"schema_version": 2', '"schema_version":'))
+        path.write_text(path.read_text().replace('"schema_version": 3', '"schema_version":'))
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_duplicate_json_keys(self):
         path = self.root / self.module
-        path.write_text(path.read_text().replace('"schema_version": 2', '"schema_version": 2, "schema_version": 2'))
+        path.write_text(path.read_text().replace('"schema_version": 3', '"schema_version": 3, "schema_version": 3'))
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_unsupported_metadata_schema(self):
-        self.change_meta(self.module, schema_version=3)
+        self.change_meta(self.module, schema_version=4)
         self.assertIn("metadata-invalid", self.codes(self.check()))
 
     def test_bool_is_not_schema_version(self):
