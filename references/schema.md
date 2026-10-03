@@ -1,4 +1,4 @@
-# Handbook V2 格式与工具契约
+# Handbook V3 格式与工具契约
 
 - [页面与目录](#页面与目录)
 - [页面 metadata](#页面-metadata)
@@ -28,7 +28,7 @@
 
 四个根页面必需，module / flow 按业务需要建立。每页一个 H1、至少一个 H2，在 H1 之后、第一个 H2 之前放一个 handbook-meta HTML 注释。代码块中的示例不计入；额外 metadata、重复 JSON key 与非 JSON 常量均报错。
 
-module / flow 使用[模板](../assets/handbook/)的固定 H2，claim.section 与所属 H2 完整标题一致。当前页面、状态、清单与验收记录均为 schema_version 2；旧产物重新 init，不自动兼容或迁移。
+module / flow 使用[模板](../assets/handbook/)的固定 H2，claim.section 与所属 H2 完整标题一致。当前页面、状态、清单与验收记录均为 schema_version 3；旧产物重新 init，不自动兼容或迁移。
 
 清单保存发现、入口进度与验收关联，格式见[清单与进度](project-inventory.md)及[清单 schema](../assets/inventory-schema.json)。脚本不发现代码或划分业务。
 
@@ -56,7 +56,7 @@ module / flow 使用[模板](../assets/handbook/)的固定 H2，claim.section �
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "module-approval",
   "kind": "module",
   "coverage": "documented",
@@ -111,7 +111,8 @@ source_checked_at 使用工具取得的实际时间并带时区。历史运行�
 |---|---|
 | id / target | 验收 ID、实际 commit 和工作区说明 |
 | sources / pages | 来源与 Markdown 页面分别保存实际 SHA-256，不用 commit 相同代替指纹 |
-| source_reviewed_at / reader | 实际源码复核时间；隔离条件 independent / unavailable 及说明 |
+| prepared_at / source_reviewed_at | 实际版本准备时间与收到源码核对结果的时间 |
+| source_review / reader | 源码核对结果及输入指纹；各自的隔离条件和说明 |
 | scenarios | id、entrypoints、topics、question、expected、reading、verdict、assessment、reviewed_at |
 | not_applicable | 按入口 ID、检查方面保存 reason 与 sources |
 
@@ -121,13 +122,17 @@ expected 包含 answer 和 sources（path，可选 symbol / line）。reading �
 
 源码答案引用该入口的实现，来源必须存在于 snapshots 与清单。阅读依据引用已保存指纹的页面。场景关联的每个入口反向引用该记录，避免用其他业务的报告充当验收；accepted 入口的处理路径、claim 来源和关联页面都需被指纹覆盖。
 
-保存全部关联题，不能删去失败题或用其他通过题替代。修订后对同一题实际复验，更新阅读答案、判定与时间，在 assessment 保留原失败及修复说明；复验完成前仍为 failed / pending。源码复核时间不晚于评分时间；所有时间带时区且不得在未来。工具可用时用 `datetime.now(timezone.utc).isoformat()` 或宿主时钟取得实际时间，未知为 null。
+尚未准备的草稿（prepared_at / source_reviewed_at 为 null、源码核对和全部阅读／判定均 pending）允许 sources / pages 暂空，来源仍须属于清单、范围关联仍需有效。它不提供验收证明，也不应阻塞其他批次；prepare 后和已判定记录必须满足完整快照约束。
 
-脚本核对范围、引用、隔离声明、答案字段、逐题结果、检查方面及快照，不判定答案真假。语义、隔离真实性和未发现分支仍由 Agent / 人工负责。变更及复验规则见[阅读验收](reading-review.md#变更后的有效性)。
+source_review 保存 status（pending / passed / failed / unavailable）、isolation、description、input_fingerprint 和未解决 findings。passed 要求独立复核、无未解决问题且输入指纹匹配题目、预期答案、不适用理由、target 及源码／页面快照；修改其中任何项都要重新核对。此指纹不包含后续阅读答案和评分。声明不能代替实际源码核对。
+
+保存全部关联题及失败历史。时间遵守 prepared_at ≤ source_reviewed_at ≤ reviewed_at，均带时区且不在未来；未知为 null。使用内部工具取得真实准备、收到反馈与评分时间，不能从运行开始时间推算。局部复验保留原阅读答案及时间说明，追加本次实际确认，不声称旧答案重新独立阅读。源码核对未通过时不能保存 passed 场景。
+
+脚本核对范围、引用、隔离声明、答案字段、逐题结果、检查方面及快照，不判定答案真假。语义、隔离真实性和未发现分支仍由 Agent / 人工负责。变更及复验规则见[阅读验收](reading-review.md#评分保存与复验)。
 
 ## 保存复核结果
 
-check / impact 均只读，没有写记录或推进基线的子命令。以下保存仅由 init / update 执行，audit 在答复交付结果：
+check / impact 均只读。init / update 使用[阅读验收的内部工具](reading-review.md#内部记录工具)准备快照并保存实际反馈；audit 的报告与临时记录留在仓库外，不运行 finish。以下是保存边界：
 
 1. 保留旧指纹和关联，先分析候选，复核源码与手册差异。状态损坏时保留知识，只按实际核对来源修复。
 2. 写清业务和 claim，计算对应来源与页面原始字节 SHA-256；验收快照应为阅读者实际读取的版本。
@@ -147,7 +152,7 @@ python3 <skill-directory>/scripts/handbook.py check --root <project-directory> -
 python3 <skill-directory>/scripts/handbook.py impact --root <project-directory> --base <commit> --target worktree --format json
 ```
 
-check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、changed_files、unknown_files、related_units。单元状态从入口、缺口和证据派生。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
+check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、next_entries、changed_files、unknown_files、related_units。next_entries 是未验收入口 ID，供 init 继续选择批次；单元来源使用声明来源与入口已有证据，不要求重复登记。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
 
 impact 返回 changed_files、renames、direct_claims、previous_pages、related_modules、related_flows、related_units、related_entries、review_candidates、unowned_changes。根据 claim、范围、流程和清单依赖给候选；review_candidates 包含旧验收失效的入口，即使业务代码零 diff。
 
