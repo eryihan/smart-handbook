@@ -86,7 +86,7 @@ python3 scripts/handbook.py impact --root /path/to/project --base <commit>
 
 `check` 检查结构、引用、证据角色、验收记录和指纹变化，派生当前进度。`impact` 根据 diff 或历史指纹输出受影响入口，也列出手册变化导致的待复验项。两者均只读；业务发现是否完整、答案是否正确仍由 Agent 对照源码和独立阅读核对。参数、退出码及降级范围见[工具契约](references/schema.md#python-cli)。
 
-init / update 另用内部 `review.py` 准备快照、绑定源码核对结果并保存实际评分，减少手写指纹和时间。它保留其他页面、运行观察和旧基线，不自动评分或宣布完成。具体调用只供 Agent 执行，见[阅读验收](references/reading-review.md#内部记录工具)；公开命令仍为 help / init / update / audit。
+init / update 另用内部 `review.py` 建立待验记录、汇总计划问题、自动创建新验收目录和反馈模板，再绑定源码核对与实际评分。它保留历史、其他页面、运行观察和旧基线，不自动生成业务事实、评分或宣布完成。具体调用只供 Agent 执行，见[阅读验收](references/reading-review.md#内部记录工具)；公开命令仍为 help / init / update / audit。
 
 ## 开发
 
