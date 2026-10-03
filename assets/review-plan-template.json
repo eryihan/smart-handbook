@@ -1,0 +1,23 @@
+{
+  "id": "review-business-batch",
+  "target": {
+    "commit": null,
+    "worktree": "填写实际目标版本"
+  },
+  "entries": {
+    "entry-id": ["claim-id"]
+  },
+  "scenarios": [
+    {
+      "id": "business-normal",
+      "entrypoints": ["entry-id"],
+      "topics": ["normal"],
+      "question": "填写实际业务问题",
+      "expected": {
+        "answer": "填写对照实现得到的条件、数据、生效与失败结果",
+        "sources": [{"path": "src/ActualImplementation.java", "symbol": "ActualImplementation#handle()"}]
+      }
+    }
+  ],
+  "not_applicable": {}
+}

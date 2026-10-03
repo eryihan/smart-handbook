@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -46,6 +47,240 @@ class ReviewToolTest(unittest.TestCase):
 
     def project_bytes(self):
         return {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+
+    def draft_value(self):
+        case = self.fixture.record["scenarios"][0]
+        return {"id": "review-new-batch", "target": copy.deepcopy(self.fixture.record["target"]),
+                "entries": {"approve": ["approval-01"]},
+                "scenarios": [{k: copy.deepcopy(case[k]) for k in
+                               ("id", "entrypoints", "topics", "question", "expected")}],
+                "not_applicable": copy.deepcopy(self.fixture.record["not_applicable"])}
+
+    def test_plan_reports_all_entry_gaps_and_conflicts_without_writing(self):
+        f = self.fixture
+        second = copy.deepcopy(f.inventory["units"][0]["entrypoints"][0])
+        second.update(id="approve-second", status="needs-review")
+        f.inventory["units"][0]["entrypoints"].append(second)
+        f.inventory["units"][0]["entrypoints"][0]["status"] = "needs-review"
+        f.record["scenarios"][0]["entrypoints"].append("approve-second")
+        f.record["not_applicable"] = {"approve": {"normal": {
+            "reason": "Synthetic invalid conflict", "sources": [{"path": f.source}]}}}
+        f.save_inventory()
+        f.save_review()
+        before = self.project_bytes()
+        result = review.plan(self.root, self.relative)
+        self.assertFalse(result["valid"])
+        self.assertEqual(set(result["entries"]), {"approve", "approve-second"})
+        self.assertEqual(result["entries"]["approve"]["conflicts"], ["normal"])
+        self.assertTrue(all(e["missing"] for e in result["entries"].values()))
+        with self.assertRaises(review.PlanError) as error:
+            self.prepare()
+        self.assertEqual(len(error.exception.issues), len(result["issues"]))
+        self.assertEqual(before, self.project_bytes())
+        self.assertFalse(self.session.exists())
+
+    def test_malformed_exclusion_has_field_errors_before_relation_code(self):
+        self.fixture.record["not_applicable"]["approve"]["async"] = "Wrong object shape"
+        self.fixture.save_review()
+        before = self.project_bytes()
+        report = review.plan(self.root, self.relative)
+        self.assertTrue(report["issues"])
+        self.assertTrue(all(i["code"] == "plan-schema" for i in report["issues"]))
+        self.assertIn("not_applicable.approve.async", report["issues"][0]["message"])
+        with self.assertRaises(review.PlanError):
+            self.prepare()
+        self.assertEqual(before, self.project_bytes())
+
+    def test_draft_links_pending_record_preserving_history_state_and_gaps(self):
+        f = self.fixture
+        f.inventory["status"] = "complete"
+        f.save_inventory()
+        before = self.project_bytes()
+        relative = ".smart-handbook/.reviews/new-batch.json"
+        result = review.draft(self.root, relative, self.draft_value())
+        record = review.read(self.root / relative)
+        inventory = review.read(self.root / hb.INVENTORY_PATH)
+        entry = inventory["units"][0]["entrypoints"][0]
+        self.assertTrue(result["saved"])
+        self.assertEqual(inventory["status"], "incomplete")
+        self.assertEqual(entry["status"], "needs-review")
+        self.assertEqual(set(entry["reviews"]), {self.relative, relative})
+        self.assertEqual(entry["gaps"], f.inventory["units"][0]["entrypoints"][0]["gaps"])
+        self.assertEqual(record["scenarios"][0]["verdict"], "pending")
+        self.assertEqual(record["source_review"]["status"], "pending")
+        self.assertIsNone(record["prepared_at"])
+        for path, data in before.items():
+            if path != hb.INVENTORY_PATH:
+                self.assertEqual((self.root / path).read_bytes(), data)
+        self.assertTrue(review.plan(self.root, relative)["valid"])
+        self.assertFalse(hb.Handbook(self.root).check()["inventory"]["ready_to_complete"])
+
+    def test_invalid_draft_reports_plan_problems_without_partial_files(self):
+        value = self.draft_value()
+        value["not_applicable"] = {}
+        before = self.project_bytes()
+        with self.assertRaises(review.PlanError):
+            review.draft(self.root, ".smart-handbook/.reviews/new.json", value)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_draft_rejects_overwriting_record_or_duplicate_id(self):
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "new record path"):
+            review.draft(self.root, self.relative, self.draft_value())
+        value = self.draft_value()
+        value["id"] = self.fixture.record["id"]
+        with self.assertRaisesRegex(ValueError, "unique review ID"):
+            review.draft(self.root, ".smart-handbook/.reviews/new.json", value)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_draft_rejects_unknown_claims_and_mismatched_scope(self):
+        before = self.project_bytes()
+        for value in (dict(self.draft_value(), entries={"approve": ["unknown-claim"]}),
+                      dict(self.draft_value(), entries={"other-entry": ["approval-01"]})):
+            with self.assertRaises(ValueError):
+                review.draft(self.root, ".smart-handbook/.reviews/new.json", value)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_draft_failure_rolls_back_new_record_and_inventory(self):
+        before = self.project_bytes()
+        real_replace = review.os.replace
+
+        def fail_inventory(source, target):
+            if str(target).endswith(".inventory.json"):
+                raise OSError("synthetic inventory write failure")
+            return real_replace(source, target)
+
+        with patch.object(review.os, "replace", side_effect=fail_inventory):
+            with self.assertRaises(OSError):
+                review.draft(self.root, ".smart-handbook/.reviews/new.json", self.draft_value())
+        self.assertEqual(before, self.project_bytes())
+
+    def test_draft_cannot_follow_inventory_symlink_into_business_directory(self):
+        path = self.root / hb.INVENTORY_PATH
+        external = self.root / "src/inventory.json"
+        external.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(external)
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "Inventory symlink"):
+            review.draft(self.root, ".smart-handbook/.reviews/new.json", self.draft_value())
+        self.assertEqual(before, self.project_bytes())
+
+    def test_automatic_sessions_are_unique_and_feedback_templates_cannot_pass(self):
+        before = self.project_bytes()
+        sessions = []
+        for _ in range(2):
+            result = review.prepare(self.root, self.relative)
+            session = Path(result["session"])
+            self.addCleanup(shutil.rmtree, session)
+            sessions.append(session)
+            source = review.read(Path(result["source_feedback"]))
+            self.assertEqual(source["status"], "pending")
+            with self.assertRaisesRegex(ValueError, "not pending"):
+                review.seal(self.root, session, source)
+            review.seal(self.root, session, {"status": "passed", "isolation": "independent",
+                "description": "synthetic actual feedback", "findings": [], "retained": {}})
+            with self.assertRaisesRegex(ValueError, "actual grading"):
+                review.finish(self.root, session, review.read(Path(result["graded_feedback"])))
+            self.assertFalse(any(p.name in ("source-feedback.json", "graded-feedback.json")
+                                 for p in (session / "reader").rglob("*")))
+        self.assertNotEqual(*sessions)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_feedback_template_lists_retained_ids_without_invented_assessments(self):
+        extra = copy.deepcopy(self.fixture.record["scenarios"][0])
+        extra["id"] = "approve-second"
+        self.fixture.record["scenarios"].append(extra)
+        self.fixture.save_review()
+        result = self.prepare(["approve-normal"])
+        source = review.read(Path(result["source_feedback"]))
+        graded = review.read(Path(result["graded_feedback"]))
+        self.assertEqual(source["retained"], {"approve-second": ""})
+        self.assertEqual([c["id"] for c in graded["scenarios"]], ["approve-normal"])
+        source.update(status="passed", isolation="independent")
+        with self.assertRaisesRegex(ValueError, "explicit source/diff"):
+            review.seal(self.root, self.session, source)
+
+    def test_source_task_keeps_facts_and_retained_reading_without_duplicate_history(self):
+        extra = copy.deepcopy(self.fixture.record["scenarios"][0])
+        extra["id"] = "approve-second"
+        self.fixture.record["scenarios"].append(extra)
+        self.fixture.save_review()
+        result = self.prepare(["approve-normal"])
+        task = review.read(Path(result["source_task"]))
+        self.assertEqual(task["selected"][0]["expected"], self.fixture.record["scenarios"][0]["expected"])
+        self.assertEqual(task["retained"][0]["previous_reading"], extra["reading"])
+        self.assertNotIn("assessment", task["selected"][0])
+        self.assertNotIn("original", task)
+        self.assertFalse((self.session / "reader/source-task.json").exists())
+        Path(result["source_task"]).write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Source task changed"):
+            self.seal(retained={"approve-second": "Synthetic unchanged facts"})
+
+    def test_draft_preserves_recorded_gap_and_cannot_make_it_complete(self):
+        entry = self.fixture.inventory["units"][0]["entrypoints"][0]
+        entry.update(status="known-gap", gaps=["Synthetic unresolved local receiver"])
+        self.fixture.save_inventory()
+        review.draft(self.root, ".smart-handbook/.reviews/new.json", self.draft_value())
+        inventory = review.read(self.root / hb.INVENTORY_PATH)
+        self.assertEqual(inventory["units"][0]["entrypoints"][0]["gaps"], entry["gaps"])
+        self.assertFalse(self.fixture.check()["inventory"]["ready_to_complete"])
+
+    def test_cli_draft_auto_prepare_seal_finish_keeps_agent_acceptance_explicit(self):
+        value = self.draft_value()
+        plan_file = Path(self.temporary.name) / "plan.json"
+        plan_file.write_text(json.dumps(value), encoding="utf-8")
+        relative = ".smart-handbook/.reviews/new.json"
+        base = [sys.executable, str(SKILL / "scripts/review.py")]
+
+        def invoke(phase, *args):
+            result = subprocess.run(base + [phase, "--root", str(self.root), *args], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+
+        invoke("draft", "--record", relative, "--input", str(plan_file))
+        invoke("plan", "--record", relative)
+        prepared = invoke("prepare", "--record", relative)
+        session = Path(prepared["session"])
+        self.addCleanup(shutil.rmtree, session)
+        source = {"status": "passed", "isolation": "independent", "description": "synthetic CLI feedback",
+                  "findings": [], "retained": {}}
+        Path(prepared["source_feedback"]).write_text(json.dumps(source), encoding="utf-8")
+        invoke("seal", "--session", str(session), "--result", prepared["source_feedback"])
+        Path(prepared["graded_feedback"]).write_text(json.dumps(self.feedback()), encoding="utf-8")
+        invoke("finish", "--session", str(session), "--result", prepared["graded_feedback"])
+        inventory = review.read(self.root / hb.INVENTORY_PATH)
+        self.assertEqual(inventory["units"][0]["entrypoints"][0]["status"], "needs-review")
+        inventory["units"][0]["entrypoints"][0]["status"] = "accepted"
+        (self.root / hb.INVENTORY_PATH).write_text(json.dumps(inventory), encoding="utf-8")
+        self.assertFalse([i for i in self.fixture.check()["issues"] if i["level"] == "error"])
+
+    def test_unrelated_live_page_update_during_reading_keeps_frozen_batch_valid(self):
+        self.prepare()
+        self.seal()
+        unrelated = self.root / self.fixture.flow
+        unrelated.write_text(unrelated.read_text() + "\nNext independent batch note.\n")
+        review.finish(self.root, self.session, self.feedback())
+        self.assertEqual(self.fixture.check()["inventory"]["entries"]["approve"]["status"], "accepted")
+
+    def test_cli_plan_reports_invalid_input_as_json_and_draft_accepts_plain_json(self):
+        value = self.draft_value()
+        plan_file = Path(self.temporary.name) / "plan.json"
+        plan_file.write_text(json.dumps(value), encoding="utf-8")
+        relative = ".smart-handbook/.reviews/new.json"
+        base = [sys.executable, str(SKILL / "scripts/review.py")]
+        result = subprocess.run(base + ["draft", "--root", str(self.root), "--record", relative,
+                                       "--input", str(plan_file)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = review.read(self.root / relative)
+        record["not_applicable"] = {}
+        (self.root / relative).write_text(json.dumps(record), encoding="utf-8")
+        before = self.project_bytes()
+        result = subprocess.run(base + ["plan", "--root", str(self.root), "--record", relative],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(json.loads(result.stdout)["valid"])
+        self.assertEqual(before, self.project_bytes())
 
     def test_prepare_and_seal_are_read_only_and_reader_packet_hides_answers(self):
         before = self.project_bytes()
