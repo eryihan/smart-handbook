@@ -2,7 +2,7 @@
 
 <!-- handbook-meta
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "handbook-working-guide",
   "kind": "working-guide",
   "coverage": "documented",

@@ -2,7 +2,7 @@
 
 <!-- handbook-meta
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "flow-example",
   "kind": "flow",
   "coverage": "navigation-only",

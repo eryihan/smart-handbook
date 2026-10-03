@@ -2,7 +2,7 @@
 
 <!-- handbook-meta
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "id": "module-example",
   "kind": "module",
   "coverage": "navigation-only",

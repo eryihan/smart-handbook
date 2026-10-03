@@ -1,8 +1,12 @@
 {
   "name": "smart-handbook",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Generate, update, and audit source-backed business handbooks in .smart-handbook/.",
-  "author": {"name": "eryihan"},
+  "author": {
+    "name": "eryihan"
+  },
   "repository": "https://github.com/eryihan/smart-handbook",
-  "skills": ["./"]
+  "skills": [
+    "./"
+  ]
 }

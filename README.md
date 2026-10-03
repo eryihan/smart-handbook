@@ -43,7 +43,7 @@ codex plugin add smart-handbook@smart-handbook
 以下命令输入到 Agent 会话中。Claude Code 使用 slash command；Codex 使用普通文本命令，也可通过 `$smart-handbook help` 明确调用 Skill。
 
 1. 查看用法：Claude Code 输入 `/smart-handbook:help`，Codex 输入 `handbook help`。
-2. 为当前项目建立知识：输入 `/smart-handbook:init` 或 `handbook init`。Agent 先发现文件、入口和业务归属，再分批编写业务手册，完成源码复核与独立阅读验收。默认目标是约定范围内的全量存量业务，中断保存进度，再次 init 继续未完成项。只做导航或局部范围时明确指定。
+2. 为当前项目建立知识：输入 `/smart-handbook:init` 或 `handbook init`。Agent 先建立清单，再连续处理业务批次：分析、编写、独立源码核对、固定版本阅读、保存，然后继续下一批。默认全量梳理存量业务；实际中断时保存原因和续跑位置，再次 init 继续。只做导航或局部范围时明确指定。
 3. 从目标项目 `.smart-handbook/README.md` 找到业务手册，阅读规则、数据变化、生效与失败边界，再按引用定位代码。
 
 后续代码变化或发现手册问题时使用 update 修订；audit 只检查并报告问题。已有手册时，init 先只读核对记录是否有效，再判断续跑或复用。进度从目标项目 README 的“覆盖状态与缺口”查看。
@@ -69,7 +69,7 @@ codex plugin add smart-handbook@smart-handbook
 
 页面中的 claim 将关键结论关联到实现、SQL、配置或异步交接代码，并标明资源类型和证据角色。入口进度引用实际验收记录，模块与全量进度从有效记录汇总；文件已归属或页面已创建不代表业务已分析。
 
-代码或手册变化后，旧验收进入待复核，update 根据差异修订并复验。当前格式版本为 2，不兼容旧格式；旧产物需通过 init 重新建立，不自动迁移。
+代码或手册变化后，旧验收进入待复核，update 根据差异修订并复验。当前格式版本为 3，不兼容旧格式；旧产物需通过 init 重新建立，不自动迁移。
 
 业务内容与证据要求见[接口分析与内容验收](references/endpoint-analysis.md)，全量发现和进度见[清单标准](references/project-inventory.md)，独立读者能否理解业务由[阅读验收](references/reading-review.md)核对。
 
@@ -85,6 +85,8 @@ python3 scripts/handbook.py impact --root /path/to/project --base <commit>
 ```
 
 `check` 检查结构、引用、证据角色、验收记录和指纹变化，派生当前进度。`impact` 根据 diff 或历史指纹输出受影响入口，也列出手册变化导致的待复验项。两者均只读；业务发现是否完整、答案是否正确仍由 Agent 对照源码和独立阅读核对。参数、退出码及降级范围见[工具契约](references/schema.md#python-cli)。
+
+init / update 另用内部 `review.py` 准备快照、绑定源码核对结果并保存实际评分，减少手写指纹和时间。它保留其他页面、运行观察和旧基线，不自动评分或宣布完成。具体调用只供 Agent 执行，见[阅读验收](references/reading-review.md#内部记录工具)；公开命令仍为 help / init / update / audit。
 
 ## 开发
 

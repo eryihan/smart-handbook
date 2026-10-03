@@ -29,12 +29,12 @@ description: Generate, update, and audit source-backed business handbooks in .sm
 ## 执行约束
 
 - 确认目标仓库、代码版本和 worktree。已有导航可帮助定位，但不能代替源码核对。
-- init 默认全量梳理约定范围；Agent 按[清单与进度](references/project-inventory.md)发现并登记具体入口、分批分析与续跑。文件归属不代表已分析，完成进度从入口与有效验收记录汇总。只做导航需用户明确指定，不能作为全量完成交付。
+- init 默认全量梳理约定范围；Agent 按[清单与进度](references/project-inventory.md)发现具体入口，按清单连续处理批次，保存进度后继续。正常结束需要全量完成；提前结束记录实际中断原因。文件归属不代表已分析，只做导航需用户明确指定。
 - init / update 的写入限于目标仓库 `.smart-handbook/`；audit 不写目标仓库，help 只读插件说明。模板和脚本从 Skill 安装目录读取。
 - 按[内容归属](references/endpoint-analysis.md#内容归属与摘要)安排页面：完整规则只维护一处，导航和流程摘要保留理解所需的条件与结果，并链接详细说明。
 - 编写或复核业务内容时，按[接口分析与内容验收](references/endpoint-analysis.md)追踪实际实现、数据库操作、中间件和外部调用，包括异步消费者与状态回写。
 - `documented` 只覆盖页面明确列出的已分析入口；关键本地链路未读完时标记 `known-gap`。README 从清单派生进度与页面声明核对；claim 标明资源类型与来源角色，指纹包含实现、映射和配置。
-- 每条业务说明谁在什么条件下修改哪些数据、何时生效、失败停在哪里，并能定位代码。按[阅读验收](references/reading-review.md)保存实际场景及逐题结果，失败题修订后独立复验；读者不能继承生成上下文、读取验收附件中的预期答案或从源码补答案。
+- 每条业务说明谁在什么条件下修改哪些数据、何时生效、失败停在哪里，并能定位代码。按[阅读验收](references/reading-review.md)先独立核对源码答案，再固定版本交给独立读者；失败题修订后复验。读者只获得 Markdown 快照与问题，不继承生成历史，不读预期答案或源码。
 - 部署版本、外部协议、运行数据或验证结果缺少证据时，保留 unknown / unverified。
 - Python 检查格式、路径、文本定位、指纹和 diff；候选影响由 Agent 阅读代码确认。覆盖、来源状态、AI 复核和行为验证分别记录。
 - Python 不可用时手工检查，记录 automated check unavailable。Git 不可用时比较已有指纹；缺少历史基线时记录 baseline unavailable。
