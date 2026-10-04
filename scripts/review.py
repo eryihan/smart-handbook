@@ -124,6 +124,7 @@ def pending(record):
     for case in record["scenarios"]:
         case.update(reading=empty_reading(), verdict="pending", assessment="", reviewed_at=None)
         case.pop("reading_fingerprint", None)
+        case.pop("retention", None)
 
 
 def plan_check(book, relative, record):
@@ -272,12 +273,12 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
                 or ("reading_fingerprint" in case and case["reading_fingerprint"] != hb.reading_fingerprint(case["reading"]))
                 or (tagged and {e for s in tagged for e in s["entrypoints"]} != set(case["entrypoints"]))):
             raise ValueError("Unselected answer has conflicting reading evidence; select it for reading: " + case_id)
-    if omitted and (scope_record["reader"]["isolation"] != "independent"
-                    or any(original[i]["reading"]["status"] != "answered"
+    if omitted and any(hb.reading_reader(scope_record, original[i])["isolation"] != "independent"
+                           or original[i]["reading"]["status"] != "answered"
                            or not original[i]["reading"]["answer"].strip()
                            or not original[i]["reading"]["evidence"]
                            or not original[i]["reading"]["locations"]
-                           or not original[i]["reviewed_at"] for i in omitted)):
+                           or not original[i]["reviewed_at"] for i in omitted):
         raise ValueError("Unselected questions require actual independent reading evidence")
     if session is None:
         temporary_root = Path(tempfile.gettempdir()).resolve()
@@ -565,8 +566,6 @@ def finish(root, session, feedback):
     record = packet["record"]
     record.update({k: source[k] for k in ("source_review", "source_reviewed_at")})
     record["reader"] = copy.deepcopy(raw["reader"] if packet["selected"] else packet["original"]["reader"])
-    if source["retained"] and packet["original"]["reader"] != record["reader"]:
-        record["reader"]["description"] += "; retained answers: " + packet["original"]["reader"]["description"]
     original = {c["id"]: c for c in packet["original"]["scenarios"]}
     timestamp = now()
     for case in record["scenarios"]:
@@ -576,6 +575,7 @@ def finish(root, session, feedback):
             case.update({k: answer[k] for k in ("verdict", "assessment")})
             case["reading"] = copy.deepcopy(readings[case["id"]])
             case["reading_fingerprint"] = hb.reading_fingerprint(case["reading"])
+            case["reviewed_at"] = timestamp
             if case["verdict"] not in ("passed", "failed"):
                 raise ValueError("Finish requires actual grading")
             if prior["verdict"] != "pending":
@@ -583,14 +583,19 @@ def finish(root, session, feedback):
                             ("reading", "verdict", "assessment", "reviewed_at")}
                 if "reading_fingerprint" in prior:
                     previous["reading_fingerprint"] = prior["reading_fingerprint"]
+                if "retention" in prior:
+                    previous["retention"] = copy.deepcopy(prior["retention"])
+                else:
+                    previous["reader"] = copy.deepcopy(packet["original"]["reader"])
                 case.setdefault("history", []).append(previous)
         else:
-            case.update({k: prior[k] for k in ("reading", "verdict")})
+            case.update({k: copy.deepcopy(prior[k]) for k in ("reading", "verdict", "assessment", "reviewed_at")})
             if "reading_fingerprint" in prior:
                 case["reading_fingerprint"] = prior["reading_fingerprint"]
-            case["assessment"] = (prior["assessment"] + "\nRetained reading at " + str(prior["reviewed_at"])
-                                  + "; confirmed at " + timestamp + ": " + source["retained"][case["id"]])
-        case["reviewed_at"] = timestamp
+            # A confirmation is not a new reading. Replace its current metadata;
+            # preserve the original answer, grade, time and reader without nesting text.
+            case["retention"] = {"confirmed_at": timestamp, "reason": source["retained"][case["id"]],
+                                 "reader": copy.deepcopy(hb.reading_reader(packet["original"], prior))}
     checked(record, book.review_schema)
     book.validate_review_relations(packet["record_path"], record)
     state = copy.deepcopy(book.state)

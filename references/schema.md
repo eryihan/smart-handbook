@@ -128,7 +128,11 @@ finish 从读者直接填写的 answers.json 取 reading，评分文件仅含判
 
 source_review 保存 status（pending / passed / failed / unavailable）、isolation、context、description、input_fingerprint 和未解决 findings。context 为 fresh / authoring / unavailable，指相对生成者的实际上下文；新 seal 通过要求 fresh。旧 V3 可缺省，check 返回证据待核对项，不自动伪造字段。passed 要求独立复核、无未解决问题且输入指纹匹配题目、预期答案、不适用理由、target 及源码／页面快照；修改其中任何项都要重新核对。此指纹不包含后续阅读答案和评分。声明不能代替实际源码核对。
 
-保存全部关联题及失败历史。实际重读时，finish 将上一轮 reading、判定、评分、时间及已有指纹存入该题 history，当前 assessment 只写本轮结果；不把旧评分全文反复拼入新评分。保留题不制造重读历史，旧无绑定答案不补原始指纹。时间遵守 prepared_at ≤ source_reviewed_at ≤ reviewed_at，均带时区且不在未来；未知为 null。使用内部工具取得真实时间，不能从运行开始时间推算。局部复验保留原阅读答案及时间说明，追加本次实际确认，不声称旧答案重新独立阅读。源码核对未通过时不能保存 passed 场景。
+保存全部关联题及失败历史。实际重读时，finish 将上一轮 reading、判定、评分、时间、读者条件及已有指纹存入该题 history，当前 assessment 只写本轮结果；不把旧评分全文反复拼入新评分。保留题不制造重读历史，旧无绑定答案不补原始指纹。
+
+保留题维持原 reading、assessment、reviewed_at 和已有指纹，另存可选 retention：confirmed_at 为本次实际确认时间，reason 为具体 diff 核对理由，reader 为该答案的原独立读者条件。后续保留替换这一个确认对象，不追加确认列表，也不把旧 reader.description 拼入本轮描述。真实重读时旧确认与原阅读一起归入 history，当前题移除 retention。旧 V3 不要求补写这个字段，已有混合描述也不按字符串猜测拆除。
+
+新阅读时间遵守 prepared_at ≤ source_reviewed_at ≤ reviewed_at；保留题遵守 prepared_at ≤ source_reviewed_at ≤ retention.confirmed_at，且 confirmed_at 不早于原 reviewed_at。时间均带时区且不在未来；未知为 null，保留确认时间不可为空。使用内部工具取得真实时间，不能从运行开始时间推算。源码核对未通过时不能保存 passed 场景。
 
 脚本核对范围、引用、隔离声明、答案字段、逐题结果、检查方面及快照，不判定答案真假。语义、隔离真实性和未发现分支仍由 Agent / 人工负责。变更及复验规则见[阅读验收](reading-review.md#评分保存与复验)。
 

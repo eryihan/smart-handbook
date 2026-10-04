@@ -69,6 +69,11 @@ def reading_fingerprint(reading):
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def reading_reader(record, scenario):
+    """A retained answer belongs to its original reader, not the latest batch reader."""
+    return scenario["retention"]["reader"] if "retention" in scenario else record["reader"]
+
+
 def validate(value, schema, document, location="$", errors=None):
     """Validate the subset of JSON Schema used by the bundled schemas."""
     if errors is None:
@@ -540,10 +545,20 @@ class Handbook:
             if scenario["verdict"] != "pending":
                 if not record["source_reviewed_at"] or not scenario["reviewed_at"] or not scenario["assessment"].strip():
                     raise ValueError("A verdict requires actual source/review times and assessment")
-                if datetime.fromisoformat(scenario["reviewed_at"].replace("Z", "+00:00")) < datetime.fromisoformat(record["source_reviewed_at"].replace("Z", "+00:00")):
+                effective_time = scenario["reviewed_at"]
+                if "retention" in scenario:
+                    retention = scenario["retention"]
+                    if scenario["verdict"] != "passed" or not retention["reason"].strip():
+                        raise ValueError("Retention requires a passed reading and concrete confirmation reason")
+                    effective_time = retention["confirmed_at"]
+                    if datetime.fromisoformat(effective_time.replace("Z", "+00:00")) < datetime.fromisoformat(scenario["reviewed_at"].replace("Z", "+00:00")):
+                        raise ValueError("Retention confirmation predates the original reading")
+                if datetime.fromisoformat(effective_time.replace("Z", "+00:00")) < datetime.fromisoformat(record["source_reviewed_at"].replace("Z", "+00:00")):
                     raise ValueError("Reading verdict predates source questions")
+            elif "retention" in scenario:
+                raise ValueError("Pending reading cannot have a retention confirmation")
             if scenario["verdict"] == "passed":
-                if (proof["status"] != "passed" or record["reader"]["isolation"] != "independent" or scenario["reading"]["status"] != "answered"
+                if (proof["status"] != "passed" or reading_reader(record, scenario)["isolation"] != "independent" or scenario["reading"]["status"] != "answered"
                         or not scenario["reading"]["answer"].strip() or not scenario["expected"]["answer"].strip()
                         or not scenario["expected"]["sources"] or not scenario["reading"]["evidence"]
                         or not scenario["reading"]["locations"]):

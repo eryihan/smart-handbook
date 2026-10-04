@@ -403,7 +403,9 @@ class ReviewToolTest(unittest.TestCase):
         review.finish(self.root, self.session, self.feedback())
         record = review.read(self.root / self.relative)
         self.assertEqual(len(record["scenarios"]), 2)
-        self.assertIn("Retained reading", record["scenarios"][1]["assessment"])
+        self.assertEqual(record["scenarios"][1]["assessment"], extra["assessment"])
+        self.assertEqual(record["scenarios"][1]["reviewed_at"], extra["reviewed_at"])
+        self.assertIn("typo", record["scenarios"][1]["retention"]["reason"])
         self.assertEqual(record["scenarios"][1]["reading"], extra["reading"])
 
     def test_duplicate_or_omitted_feedback_does_not_write_any_project_file(self):
@@ -523,8 +525,145 @@ class ReviewToolTest(unittest.TestCase):
         review.finish(self.root, self.session, {"scenarios": []})
         record = review.read(self.root / self.relative)
         self.assertEqual(record["scenarios"][0]["reading"], self.fixture.record["scenarios"][0]["reading"])
-        self.assertIn("Retained reading at 2026-10-01T10:01:00Z", record["scenarios"][0]["assessment"])
+        self.assertEqual(record["scenarios"][0]["reviewed_at"], "2026-10-01T10:01:00Z")
+        self.assertEqual(record["scenarios"][0]["assessment"], self.fixture.record["scenarios"][0]["assessment"])
+        self.assertEqual(record["scenarios"][0]["retention"]["reader"], self.fixture.record["reader"])
         self.assertEqual(self.fixture.check()["inventory"]["entries"]["approve"]["status"], "accepted")
+
+    def test_repeated_retention_replaces_confirmation_without_growing_reading_history(self):
+        original = copy.deepcopy(self.fixture.record)
+        lengths = []
+        for index in range(4):
+            session = Path(self.temporary.name) / ("retain-" + str(index))
+            review.prepare(self.root, self.relative, session, retain_all=True)
+            review.seal(self.root, session, {"status": "passed", "isolation": "independent", "context": "fresh",
+                "description": "synthetic source reviewer", "findings": [],
+                "retained": {"approve-normal": "Unchanged rule and handler, confirmation " + str(index)}})
+            review.finish(self.root, session, {"scenarios": []})
+            record = review.read(self.root / self.relative)
+            case = record["scenarios"][0]
+            for key in ("reading", "assessment", "reviewed_at"):
+                self.assertEqual(case[key], original["scenarios"][0][key])
+            self.assertNotIn("history", case)
+            self.assertNotIn("reading_fingerprint", case)  # Do not fabricate legacy feedback binding.
+            self.assertEqual(case["retention"]["reader"], original["reader"])
+            self.assertEqual(case["retention"]["reason"], "Unchanged rule and handler, confirmation " + str(index))
+            self.assertEqual(record["reader"], original["reader"])
+            self.assertFalse([i for i in self.fixture.check()["issues"] if i["level"] == "error"])
+            lengths.append(len(json.dumps(record)))
+        self.assertLessEqual(max(lengths) - min(lengths), 20)  # Clock precision may differ; no appended prose.
+
+    def test_alternating_partial_reads_preserve_each_answers_actual_reader(self):
+        extra = copy.deepcopy(self.fixture.record["scenarios"][0])
+        extra["id"] = "approve-second"
+        self.fixture.record["scenarios"].append(extra)
+        self.fixture.save_review()
+        first_reader = copy.deepcopy(self.fixture.record["reader"])
+        readers = {}
+        for index, selected in enumerate(("approve-normal", "approve-second", "approve-normal")):
+            session = Path(self.temporary.name) / ("partial-" + str(index))
+            review.prepare(self.root, self.relative, session, [selected])
+            omitted = {"approve-normal", "approve-second"} - {selected}
+            review.seal(self.root, session, {"status": "passed", "isolation": "independent", "context": "fresh",
+                "description": "synthetic independent source reviewer", "findings": [],
+                "retained": {i: "Rule, evidence and handler unchanged" for i in omitted}})
+            actual_reader = {"isolation": "independent", "description": "synthetic reader " + str(index)}
+            raw = {"reader": actual_reader, "scenarios": [{"id": selected,
+                   "reading": copy.deepcopy(extra["reading"])}]}
+            (session / "reader/answers.json").write_text(json.dumps(raw))
+            review.finish(self.root, session, {"scenarios": [{"id": selected, "verdict": "passed",
+                "assessment": "synthetic actual grade " + str(index)}]})
+            record = review.read(self.root / self.relative)
+            cases = {c["id"]: c for c in record["scenarios"]}
+            prior_reader = readers.get(selected, first_reader)
+            previous = cases[selected]["history"][-1]
+            historical_reader = previous["retention"]["reader"] if "retention" in previous else previous["reader"]
+            self.assertEqual(historical_reader, prior_reader)
+            readers[selected] = actual_reader
+            self.assertEqual(record["reader"], actual_reader)
+            self.assertNotIn("retention", cases[selected])
+            for case_id in omitted:
+                self.assertEqual(cases[case_id]["retention"]["reader"], readers.get(case_id, first_reader))
+            self.assertFalse([i for i in self.fixture.check()["issues"] if i["level"] == "error"])
+        self.assertEqual(len(cases["approve-normal"]["history"]), 2)
+        self.assertEqual(len(cases["approve-second"]["history"]), 1)
+
+    def test_rereading_archives_retained_evidence_and_removes_current_confirmation(self):
+        review.prepare(self.root, self.relative, self.session, retain_all=True)
+        self.seal(retained={"approve-normal": "Only formatting changed; original answer and citations remain valid"})
+        review.finish(self.root, self.session, {"scenarios": []})
+        retained = review.read(self.root / self.relative)["scenarios"][0]
+        session = Path(self.temporary.name) / "reread"
+        review.prepare(self.root, self.relative, session)
+        review.seal(self.root, session, {"status": "passed", "isolation": "independent", "context": "fresh",
+            "description": "synthetic source reviewer", "findings": [], "retained": {}})
+        review.finish(self.root, session, self.feedback(session=session))
+        case = review.read(self.root / self.relative)["scenarios"][0]
+        self.assertNotIn("retention", case)
+        for key in ("reading", "assessment", "reviewed_at", "retention"):
+            self.assertEqual(case["history"][-1][key], retained[key])
+        self.assertEqual(case["assessment"], "Actual feedback fixture")
+        self.assertEqual(case["reading_fingerprint"], hb.reading_fingerprint(case["reading"]))
+        self.assertFalse([i for i in self.fixture.check()["issues"] if i["level"] == "error"])
+
+    def test_invalid_retention_time_is_reported_without_mutating_records(self):
+        case = self.fixture.record["scenarios"][0]
+        case["retention"] = {"confirmed_at": "2026-10-01T10:02:00Z", "reason": "Unchanged answer",
+                             "reader": copy.deepcopy(self.fixture.record["reader"])}
+        for invalid in (None, "not a time", "2026-10-01T10:02:00", "9999-10-01T10:02:00Z",
+                        "2026-10-01T10:00:30Z", "2026-10-01T09:59:00Z"):
+            with self.subTest(confirmed_at=invalid):
+                case["retention"]["confirmed_at"] = invalid
+                self.fixture.save_review()
+                before = self.project_bytes()
+                self.assertIn("review-invalid", self.fixture.codes(self.fixture.check()))
+                self.assertEqual(before, self.project_bytes())
+
+    def test_retention_cannot_relabel_an_unavailable_original_reader(self):
+        case = self.fixture.record["scenarios"][0]
+        case["retention"] = {"confirmed_at": "2026-10-01T10:02:00Z", "reason": "Unchanged answer",
+                             "reader": {"isolation": "unavailable", "description": "synthetic unavailable reader"}}
+        self.fixture.save_review()
+        before = self.project_bytes()
+        self.assertIn("review-invalid", self.fixture.codes(self.fixture.check()))
+        with self.assertRaisesRegex(ValueError, "independent reading evidence"):
+            review.prepare(self.root, self.relative, self.session, retain_all=True)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_retention_is_invalid_on_failed_or_pending_answers(self):
+        case = self.fixture.record["scenarios"][0]
+        case["retention"] = {"confirmed_at": "2026-10-01T10:02:00Z", "reason": "Unchanged answer",
+                             "reader": copy.deepcopy(self.fixture.record["reader"])}
+        for verdict in ("failed", "pending"):
+            with self.subTest(verdict=verdict):
+                case["verdict"] = verdict
+                self.fixture.save_review()
+                self.assertIn("review-invalid", self.fixture.codes(self.fixture.check()))
+
+    def test_unavailable_partial_reread_preserves_independent_retained_answer(self):
+        extra = copy.deepcopy(self.fixture.record["scenarios"][0])
+        extra["id"] = "approve-second"
+        self.fixture.record["scenarios"].append(extra)
+        self.fixture.save_review()
+        self.prepare(["approve-normal"])
+        self.seal(retained={"approve-second": "Unchanged rule and original independent answer"})
+        grade = self.feedback(failed=True)
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        raw["reader"] = {"isolation": "unavailable", "description": "synthetic unavailable reader"}
+        raw["scenarios"][0]["reading"] = {"status": "unavailable", "answer": "", "unanswered": [],
+                                            "evidence": [], "locations": []}
+        path.write_text(json.dumps(raw))
+        review.finish(self.root, self.session, grade)
+        record = review.read(self.root / self.relative)
+        self.assertEqual(record["scenarios"][0]["verdict"], "failed")
+        retained = record["scenarios"][1]
+        self.assertEqual(retained["verdict"], "passed")
+        self.assertEqual(retained["reading"], extra["reading"])
+        self.assertEqual(retained["retention"]["reader"], self.fixture.record["reader"])
+        result = self.fixture.check()
+        self.assertNotIn("review-invalid", self.fixture.codes(result))
+        self.assertFalse(result["inventory"]["ready_to_complete"])
 
     def test_another_pending_draft_does_not_block_current_review_preparation(self):
         f = self.fixture

@@ -333,6 +333,16 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
         },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed_at", "reason", "reader"],
+          "properties": {
+            "confirmed_at": {"type": "string", "format": "date-time"},
+            "reason": {"$ref": "#/$defs/text"},
+            "reader": {"$ref": "#/properties/reader"}
+          }
+        },
         "history": {
           "type": "array",
           "items": {
@@ -342,6 +352,8 @@
             "properties": {
               "reading": {"$ref": "#/$defs/scenario/properties/reading"},
               "reading_fingerprint": {"$ref": "#/$defs/scenario/properties/reading_fingerprint"},
+              "reader": {"$ref": "#/properties/reader"},
+              "retention": {"$ref": "#/$defs/scenario/properties/retention"},
               "verdict": {"enum": ["passed", "failed"]},
               "assessment": {"type": "string"},
               "reviewed_at": {"$ref": "#/$defs/time"}
