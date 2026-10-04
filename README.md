@@ -73,6 +73,8 @@ codex plugin add smart-handbook@smart-handbook
 
 升级 Skill 并让会话加载新版后，已有 V3 手册使用 `handbook update 核对新版要求，保留有效结果，只修复受影响业务`（Claude Code 对应 `/smart-handbook:update`）。先确认入口粒度与证据，再修订缺项、局部复验；无需删除 `.smart-handbook/`、反复安装或重新跑全量 init。后续仍按实际代码变化和内容问题使用 update。
 
+手册页面维护当前业务说明和覆盖摘要，执行过程在当次答复中交付。已有 README 或业务页积累执行日志时，update 先核对独有事实与证据，再清理重复过程；audit 只报告这些问题。具体存放位置与保留规则见[内容归属](references/endpoint-analysis.md#内容归属与摘要)。
+
 业务内容与证据要求见[接口分析与内容验收](references/endpoint-analysis.md)，全量发现和进度见[清单标准](references/project-inventory.md)，独立读者能否理解业务由[阅读验收](references/reading-review.md)核对。
 
 页面模板见 [assets/handbook](assets/handbook/)，metadata 和状态字段见[格式契约](references/schema.md)。
