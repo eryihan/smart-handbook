@@ -36,7 +36,7 @@ description: Generate, update, and audit source-backed business handbooks in .sm
 - `documented` 只覆盖页面明确列出的已分析入口；关键本地链路未读完时标记 `known-gap`。README 从清单派生进度与页面声明核对；claim 标明资源类型与来源角色，指纹包含实现、映射和配置。
 - 每条业务说明谁在什么条件下修改哪些数据、何时生效、失败停在哪里，并能定位代码。按[阅读验收](references/reading-review.md)先独立核对源码答案，再固定版本交给独立读者；失败题修订后复验。读者只获得 Markdown 快照与问题，不继承生成历史，不读预期答案或源码。
 - 部署版本、外部协议、运行数据或验证结果缺少证据时，保留 unknown / unverified。
-- Python 检查格式、路径、文本定位、指纹和 diff；候选影响由 Agent 阅读代码确认。覆盖、来源状态、AI 复核和行为验证分别记录。
+- Python 检查格式、路径、文本定位、指纹和 diff，分别提供粒度、未完成入口与证据候选；Agent 判断实际影响与语义。已有有效分析按清单的复用规则保留，Skill 升级不触发全量重跑。覆盖、来源状态、AI 复核和行为验证分别记录。
 - Python 不可用时手工检查，记录 automated check unavailable。Git 不可用时比较已有指纹；缺少历史基线时记录 baseline unavailable。
 
 ## 授权

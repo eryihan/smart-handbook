@@ -10,7 +10,7 @@ init 的全量发现与续跑、update 的影响分析、audit 的覆盖检查�
 
 发现入口后继续展开可执行动作：同一 Controller 的查询、保存、撤销分别处置；消息分发、任务、回调及配置选择的处理器按实际分支追踪。类名和路由前缀可辅助发现，不能用它们替代具体处理入口。入口可使用方法、函数或脚本行号定位，业务 ID 与命名由 Agent 决定。
 
-初步发现的类／路由前缀保留 pending，分析前展开为具体动作并核对遗漏的方法。某个代表方法不能替代同类其他动作；没有处理动作的空壳类按支撑文件登记，不虚构业务入口。README 说明当前计数是已登记动作还是仍含候选，不能把类数当作接口总数。发现及拆分由 Agent 按实际代码处理，脚本不按固定注解或命名替项目分组。
+初步发现的类／路由前缀登记 kind=candidate、保持 pending。Agent 核对该类全部可执行方法与实际注册后，展开为 kind=action 的具体动作；同一处理器有多个触发方式时可共用一个动作，trigger 列出实际触发及差异。某个代表方法不能替代同类其他动作；没有处理动作的空壳类按支撑文件登记，不虚构业务入口。README 分开统计已确认动作与候选，不能把类数当作接口总数。脚本检查 kind 与验收条件，不按固定注解或命名替项目发现、分组或证明完整。
 
 共用逻辑可以合并编写与验收，但逐入口列明使用方、适用条件和差异，核对权限、数据操作、生效、失败和副作用确实一致。一个入口已分析不能代表整个目录；“模板同构”“都是查算写”不足以省略其他业务。
 
@@ -22,7 +22,7 @@ init 的全量发现与续跑、update 的影响分析、audit 的覆盖检查�
 
 ## 保存结构
 
-清单位于 `.smart-handbook/.inventory.json`，使用[模板](../assets/inventory-template.json)与[清单 schema](../assets/inventory-schema.json)。当前格式为 V3；旧产物需要重新 init，不自动迁移。
+清单位于 `.smart-handbook/.inventory.json`，使用[模板](../assets/inventory-template.json)与[清单 schema](../assets/inventory-schema.json)。当前格式为 V3；更早的 schema 不自动迁移。V3 增补字段缺失按下述复用规则处理，不要求重建。
 
 | 字段 | 内容 |
 |---|---|
@@ -32,7 +32,7 @@ init 的全量发现与续跑、update 的影响分析、audit 的覆盖检查�
 | `files` | path、实际 SHA-256 或 null、自由文本 role、units、disposition、reason |
 | `units` | id、name、entrypoints、pages、sources、depends_on、gaps |
 
-每个入口包含 `id`、`path`、`symbol` 或 `line`、`trigger`、`status`、`claims`、`gaps`、`reviews`。ID 全库唯一；trigger 描述实际路由、订阅、事件、调度或其他调用方式。claims 引用页面 claim ID，reviews 引用 `.smart-handbook/.reviews/*.json`，不重复保存规则与验收总结。
+每个入口包含 `id`、`kind`、`path`、`symbol` 或 `line`、`trigger`、`status`、`claims`、`gaps`、`reviews`。ID 全库唯一；trigger 描述实际路由、订阅、事件、调度或其他调用方式。claims 引用页面 claim ID，reviews 引用 `.smart-handbook/.reviews/*.json`，不重复保存规则与验收总结。旧 V3 缺 kind 时只表示粒度未确认，不能自动补 action。
 
 入口状态为 pending / analysing / needs-review / accepted / known-gap。导航入口保持 pending；关键本地逻辑未查清记录 gaps，使用 known-gap。页面列出的本地数据操作、接收方或失败分支缺口须同步到对应入口／单元，不能一边声明未查清、一边 accepted。accepted 必须关联已写清的业务 claim，完成[源码复核和独立阅读](reading-review.md)，没有关键本地缺口。
 
@@ -46,7 +46,11 @@ init 的全量发现与续跑、update 的影响分析、audit 的覆盖检查�
 
 首轮发现就保存清单与 pending 入口，不等全量业务分析完成；后续按业务分批保存页面、入口进度、来源指纹、验收记录、缺口和下一步，再开始下一批。中断或上下文切换保持原全量目标。
 
-已有产物时先只读 check，并核对当前发现范围。有效但未完成的 init 按入口续跑；导航完成不代表深入分析完成。已完整且指纹未变时展示记录的适用版本与阅读入口，结构通过不代表重新完成语义审计。已完成产物的代码变化提示 update；初始化仍未完成时核对变动来源及使用方，继续原 init。必需记录缺失或格式无效则重新发现与初始化；明确重建时保留已有知识和来源后核对替换。
+已有产物时先只读 check，并核对目标与发现范围。区分三个工作队列：action_candidates 用于确认粒度，next_entries 用于补分析或验收，review_attention 用于核对证据限制；三者不能合并成“全部重跑”。有效但未完成的 init 按入口续跑；导航完成不代表深入分析完成。已完整且指纹未变时展示记录的适用版本与阅读入口，结构通过不代表重新完成语义审计。已完成产物的代码变化或内容冲突交由 update；初始化仍未完成时核对变动来源及使用方，继续原 init。
+
+Skill 版本变化本身不使已有知识失效。复用判断看目标范围、具体来源与页面 diff、实际验收证据及新要求是否影响业务结论。缺 kind 时先核对入口文件和注册：原来就是具体动作的，只补经核对的 kind；整类候选展开后只分析缺失动作，原 claim 与通过场景是否仍适用按阅读验收核对。缺原始回答绑定不自动判错，也不能补算指纹冒充原件；明确错误、证据矛盾与无法确认分开处理。
+
+记录损坏先定位具体文件和字段，保留 Markdown、有效来源与其他批次；只重建无法恢复的清单或记录。更早的 schema 或用户明确要求重建时重新发现，仍先保留可参考的知识。不能因升级、单页错误或一份验收失效删除整个目录、清空全部状态或推进全库基线。
 
 复核实际文件版本后保存指纹。收尾重新枚举范围、核对新增/删除及分析期间变化，避免混合版本。update 只处置本次影响，未分析存量仍由 init 续跑；审计发现记录冲突时仅报告建议状态。
 
@@ -63,4 +67,4 @@ full 保存 complete 前必须确认：
 
 navigation 的 complete 仅表示声明的导航任务结束。用户明确限定范围时只报告该范围完成，不能升级成全库完成。
 
-check 返回入口与单元派生状态、ready_to_complete、来源与验收快照变化；impact 给出来源和依赖候选及旧验收待复核项。next_entries 为空但 ready_to_complete 为 false 时继续查看单元 gaps、unverified_sources 与发现记录，不能认定初始化已完成或自行解释成工具误报。脚本不发现未登记代码、不验证答案真假；Agent 继续负责遗漏发现与源码语义核对。
+check 返回入口与单元派生状态、ready_to_complete、来源与验收快照变化；impact 给出来源和依赖候选及旧验收待复核项。next_entries 为空但 ready_to_complete 为 false 时查看 action_candidates、单元 gaps、unverified_sources 与发现记录，不能认定初始化已完成或解释成工具误报。review_attention 是待判断证据，不是自动失败或重读清单。脚本不发现未登记代码、不验证答案真假；Agent 继续负责遗漏发现与源码语义核对。

@@ -28,7 +28,7 @@
 
 四个根页面必需，module / flow 按业务需要建立。每页一个 H1、至少一个 H2，在 H1 之后、第一个 H2 之前放一个 handbook-meta HTML 注释。代码块中的示例不计入；额外 metadata、重复 JSON key 与非 JSON 常量均报错。
 
-module / flow 使用[模板](../assets/handbook/)的固定 H2，claim.section 与所属 H2 完整标题一致。当前页面、状态、清单与验收记录均为 schema_version 3；旧产物重新 init，不自动兼容或迁移。
+module / flow 使用[模板](../assets/handbook/)的固定 H2，claim.section 与所属 H2 完整标题一致。当前页面、状态、清单与验收记录均为 schema_version 3；更早的 schema 不自动迁移。V3 增补字段缺失按[复用规则](project-inventory.md#分批续跑与目标变化)核对，不清空已有产物。
 
 清单保存发现、入口进度与验收关联，格式见[清单与进度](project-inventory.md)及[清单 schema](../assets/inventory-schema.json)。脚本不发现代码或划分业务。
 
@@ -118,7 +118,7 @@ source_checked_at 使用工具取得的实际时间并带时区。历史运行�
 
 检查方面为 normal / rejection / effective-time / partial-failure / repeat / async。由实际场景覆盖或提供源码支持的不适用理由，不固定题数；正常路径不能标不适用。
 
-expected 包含 answer 和 sources（path，可选 symbol / line）。reading 包含 status（pending / answered / unavailable）、answer、evidence（page + 实际 H2 section）、locations（源码 path + symbol 或 line）。verdict 为 pending / passed / failed，已判定时填写具体 assessment 与实际 reviewed_at。
+expected 包含 answer 和 sources（path，可选 symbol / line）。reading 包含 status（pending / answered / unavailable）、answer、unanswered（题目中无法回答的业务问题）、evidence（page + 实际 H2 section）、locations（源码 path + symbol 或 line）。合并题的 locations 另用 entrypoints 对应具体动作；必须覆盖题目中的所有动作，共用实现可列多个 ID，但语义由独立复核确认。verdict 为 pending / passed / failed，已判定时填写具体 assessment 与实际 reviewed_at。旧 V3 的 unanswered 与定位标签可缺省；新 finish 要求 unanswered，合并题通过要求逐动作定位。
 
 finish 从读者直接填写的 answers.json 取 reading，评分文件仅含判定与理由；新增的 reading_fingerprint 绑定该题完整阅读结果，check 检测保存后的答案、依据和定位变动。该字段是 V3 的可选补充，旧记录可读取，但没有绑定或实际原报告时不能证明其反馈未被改写。failed 保留错误定位及未绑定依据；这些内容不提供验收证明，也不作为已验证来源。passed 仍要求依据与具体代码位置有效且已绑定。
 
@@ -126,9 +126,9 @@ finish 从读者直接填写的 answers.json 取 reading，评分文件仅含判
 
 尚未准备的草稿（prepared_at / source_reviewed_at 为 null、源码核对和全部阅读／判定均 pending）允许 sources / pages 暂空，来源仍须属于清单、范围关联仍需有效。它不提供验收证明，也不应阻塞其他批次；prepare 后和已判定记录必须满足完整快照约束。
 
-source_review 保存 status（pending / passed / failed / unavailable）、isolation、description、input_fingerprint 和未解决 findings。passed 要求独立复核、无未解决问题且输入指纹匹配题目、预期答案、不适用理由、target 及源码／页面快照；修改其中任何项都要重新核对。此指纹不包含后续阅读答案和评分。声明不能代替实际源码核对。
+source_review 保存 status（pending / passed / failed / unavailable）、isolation、context、description、input_fingerprint 和未解决 findings。context 为 fresh / authoring / unavailable，指相对生成者的实际上下文；新 seal 通过要求 fresh。旧 V3 可缺省，check 返回证据待核对项，不自动伪造字段。passed 要求独立复核、无未解决问题且输入指纹匹配题目、预期答案、不适用理由、target 及源码／页面快照；修改其中任何项都要重新核对。此指纹不包含后续阅读答案和评分。声明不能代替实际源码核对。
 
-保存全部关联题及失败历史。时间遵守 prepared_at ≤ source_reviewed_at ≤ reviewed_at，均带时区且不在未来；未知为 null。使用内部工具取得真实准备、收到反馈与评分时间，不能从运行开始时间推算。局部复验保留原阅读答案及时间说明，追加本次实际确认，不声称旧答案重新独立阅读。源码核对未通过时不能保存 passed 场景。
+保存全部关联题及失败历史。实际重读时，finish 将上一轮 reading、判定、评分、时间及已有指纹存入该题 history，当前 assessment 只写本轮结果；不把旧评分全文反复拼入新评分。保留题不制造重读历史，旧无绑定答案不补原始指纹。时间遵守 prepared_at ≤ source_reviewed_at ≤ reviewed_at，均带时区且不在未来；未知为 null。使用内部工具取得真实时间，不能从运行开始时间推算。局部复验保留原阅读答案及时间说明，追加本次实际确认，不声称旧答案重新独立阅读。源码核对未通过时不能保存 passed 场景。
 
 脚本核对范围、引用、隔离声明、答案字段、逐题结果、检查方面及快照，不判定答案真假。语义、隔离真实性和未发现分支仍由 Agent / 人工负责。变更及复验规则见[阅读验收](reading-review.md#评分保存与复验)。
 
@@ -154,11 +154,13 @@ python3 <skill-directory>/scripts/handbook.py check --root <project-directory> -
 python3 <skill-directory>/scripts/handbook.py impact --root <project-directory> --base <commit> --target worktree --format json
 ```
 
-check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、next_entries、changed_files、unknown_files、related_units。next_entries 是未验收入口 ID，供 init 继续选择批次；单元同时返回 unverified_sources，无入口单元自动纳入其页面 claim 来源。单元来源使用声明来源与入口已有证据，不要求重复登记。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
+check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、next_entries、action_candidates、review_attention、changed_files、unknown_files、related_units。next_entries 是未验收入口 ID；action_candidates 是 kind 未确认或仍为 candidate 的入口，full 完成前由 Agent 核对为具体动作，不能通过补 kind 免除展开；review_attention 按记录、场景、入口列出源码上下文未确认、原始阅读未绑定、未答项未声明、合并动作未对应等证据限制，供 Agent 分类，不自动判答案失败。三者用途不同，不统一全量重验。单元同时返回 unverified_sources，无入口单元自动纳入其页面 claim 来源。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
 
 impact 返回 changed_files、renames、direct_claims、previous_pages、related_modules、related_flows、related_units、related_entries、review_candidates、unowned_changes。根据 claim、范围、流程和清单依赖给候选；review_candidates 包含旧验收失效的入口，即使业务代码零 diff。
 
 退出码 0 只表示无机械错误，仍可能有 warning 或未完成入口；1 为机械错误，2 为参数错误。标题、非空 claims、指纹一致、答案字段齐全和退出成功都不证明业务语义正确。
+
+check 默认文本只展示进度、队列计数和前 10 项、证据限制汇总及问题；不是完整队列。--format json 返回完整结构，可保存在仓库外按本批记录读取，避免反复展开全库 JSON。
 
 ## impact 的比较范围
 

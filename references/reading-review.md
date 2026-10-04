@@ -10,7 +10,7 @@ init 验收各入口，update 复验受影响场景，audit 检查已有记录�
 
 预期答案写清条件、实际资源、字段、状态、停止位置及实现证据。按实际分支出题，不能只从手册摘问题；尤其检查校验前副作用、远端成功后本地失败、异步体异常、消息交接和重复副作用。首次阅读前准备完整场景，不把缺失题目留到通过后补齐。
 
-先检查格式及场景计划，再让未继承生成历史的源码复核者读取原始实现、SQL、实体和配置：先独立复述调用顺序及失败结果，再比对手册、答案和不适用理由。接口须查实际实现；本地跨模块继续追踪，关键框架／依赖行为遵循[沿实现追踪](endpoint-analysis.md#沿实现追踪)。逐项记录错误和依据，不能把已有答案当作标准答案背书。
+先检查动作粒度、格式及场景计划，再让未继承生成历史的源码复核者读取原始实现、SQL、实体和配置：先独立复述调用顺序及失败结果，再比对手册、答案和不适用理由。独立性相对生成者判断；生成者自查、继承生成历史的 Agent，或“只与读者不同”均不满足。实际新上下文记录 context=fresh，生成上下文自查为 authoring，无法隔离为 unavailable；后二者不能通过。接口须查实际实现；本地跨模块继续追踪，关键框架／依赖行为遵循[沿实现追踪](endpoint-analysis.md#沿实现追踪)。逐项记录错误和依据，不能把已有答案当作标准答案背书。
 
 委派时给出本批具体动作、待核对断言、入口与已发现的实现／SQL／配置位置、相关页面及输出文件。定位只帮助起步，复核者仍沿调用补查依赖；遇到缺口返回下一处证据，不扩大到无关模块。按场景 ID 返回实际结论、问题和依据。任务大小按涉及的链路与分支判断，不能用题数代替。局部复验只重查受影响断言；保留题仍逐题核对具体 diff。
 
@@ -24,11 +24,11 @@ init 验收各入口，update 复验受影响场景，audit 检查已有记录�
 
 源码复核期间也保持绑定的题目、入口 claim 与页面不变。后台验收可用时，执行安排见 [init](workflows/init.md#持续处理清单)。网络或宿主故障不作为内容失败；确认版本未变后重试该阶段一次，再次失败保存 unavailable / needs-review 并继续可做的分析，不循环重启全部流程。旧目录保留，修订使用新目录；读取阶段重试可继续使用已封存的同一快照。
 
-读者逐题回答业务结果、手册依据、代码位置和无法确认项。依据使用页面路径与实际 H2，代码位置使用文件内方法、SQL或行号。说明缺失时回答无法确认，不按惯例补推，也不读源码补答案。
+读者逐题回答业务结果、手册依据、代码位置和无法确认项。依据使用页面路径与实际 H2，代码位置使用文件内方法、SQL或行号。合并题逐动作作答，在定位的 entrypoints 中标明对应动作；可共享实际实现，不能用代表方法代替其他动作。题目中的条件、数据、生效、失败或定位无法回答时写入 unanswered；与题目无关的部署／远端未知在正文说明。说明缺失时不按惯例补推，也不读源码补答案。
 
 ## 评分、保存与复验
 
-评分者以已核对的源码事实逐题比对条件、数据、生效、失败和定位。核心问题答错、无法回答、定位失败或需要读源码补答案均为 failed。相同错误出现在手册和答案中也不能通过；重新回到源码核对阶段修正。
+评分者以已核对的源码事实逐题、逐动作比对条件、数据、生效、失败和定位。核心问题答错、无法回答、定位失败或需要读源码补答案均为 failed；读者忠实记录手册缺失也属于手册验收失败。unanswered 非空不能 passed。相同错误出现在手册和答案中也不能通过；重新回到源码核对阶段修正。不能以控制器族性质或共用实现为由，将未解释的动作一并通过。
 
 保存全部实际题及结果，不能删失败题或批量填 passed。任何失败、未完成题或不可用复核均阻塞其关联入口 accepted。修订权威页后，只独立复验受影响题；未受影响答案需根据具体 diff 确認业务结论、依据和定位仍有效，保留原答案及阅读时间，追加本轮核对说明。共同规则变化检查所有使用方，定位变化复验定位。
 
@@ -70,6 +70,7 @@ source-task.json 给源码复核者本批入口、题目、答案、绑定页及
 {
   "status": "passed",
   "isolation": "independent",
+  "context": "fresh",
   "description": "实际复核者及隔离方式",
   "findings": [],
   "retained": {}
@@ -82,19 +83,27 @@ status 使用 passed / failed / unavailable；findings 记录未解决错误，p
 python3 <skill-directory>/scripts/review.py seal --root <project-directory> --session <temporary-directory>/review-01 --result <source-feedback.json>
 ```
 
-seal 只写临时 session，自动记录收到反馈的真实时间并绑定题目、expected、不适用理由及版本指纹。reader_allowed 为 true 才开始独立阅读。让读者直接填写返回的 reader_feedback（reader/answers.json），不提供评分文件：
+seal 只写临时 session，自动记录收到反馈的真实时间并绑定题目、expected、不适用理由及版本指纹。新反馈通过须 context=fresh；字段是可核对声明，不能代替实际隔离。reader_allowed 为 true 才开始独立阅读。读者读取 prepare 生成的 guide.md（字段规则与真实 H2）、questions.json 和冻结页面，直接填写 reader_feedback（reader/answers.json），不提供评分文件：
 
 ```json
 {
   "reader": {"isolation": "independent", "description": "实际读者及隔离方式"},
   "scenarios": [{
     "id": "实际场景ID",
-    "reading": {"status": "answered", "answer": "实际回复", "evidence": [{"page": ".smart-handbook/modules/<业务ID>.md", "section": "实际H2"}], "locations": [{"path": "实现路径", "symbol": "类型#方法"}]}
+    "reading": {"status": "answered", "answer": "实际回复", "unanswered": [], "evidence": [{"page": ".smart-handbook/modules/<业务ID>.md", "section": "实际H2"}], "locations": [{"path": "实现路径", "symbol": "类型#方法", "entrypoints": ["对应动作ID"]}]}
   }]
 }
 ```
 
-读者完成后保留该文件原样，评分者只填写 graded-feedback.json：
+读者完成后保留该文件原样。主 Agent 可一次只读检查全部输出问题，不重新执行源码复核：
+
+```sh
+python3 <skill-directory>/scripts/review.py plan --root <project-directory> --session <temporary-directory>/review-01
+```
+
+此调用汇总字段、H2、定位格式、动作对应及显式未答项，不替代评分，也不改文件。纯序列化／多余字段／H2 格式问题一次反馈给原读者，按原快照自行修正；不能夹带源码结论、具体方法答案或删除缺失说明。手册缺少业务定位和规则属于内容失败，保存失败后修订并复验，不当作格式问题反复提示答案。finish 同样汇总这些问题，不必为每条错误另建 session。
+
+评分者只填写 graded-feedback.json：
 
 ```json
 {"scenarios": [{"id": "实际场景ID", "verdict": "passed", "assessment": "根据源码逐项评分的理由"}]}
@@ -106,7 +115,7 @@ seal 只写临时 session，自动记录收到反馈的真实时间并绑定题�
 python3 <skill-directory>/scripts/review.py finish --root <project-directory> --session <temporary-directory>/review-01 --result <graded-feedback.json>
 ```
 
-finish 检查源码、题目和页面仍为同一版本，从 answers.json 直接保存 reading，另存逐题 reading_fingerprint，评分仅提供判定与理由。错误定位和缺失依据可原样保存为 failed；passed 仍要求正确、已绑定的依据和具体定位。工具不证明读者身份或隔离真实，评分者也不得编辑回答文件。只更新本批 claim 页的来源记录，保留运行观察、其他页和旧基线。Agent 核对入口状态，运行 check，同步摘要并继续下一批。
+finish 检查源码、题目和页面仍为同一版本，从 answers.json 直接保存 reading，另存逐题 reading_fingerprint，评分仅提供判定与理由。新答案必须显式填写 unanswered；合并题定位逐动作对应，未答项不能被评分覆盖。错误定位和缺失依据可原样保存为 failed；passed 仍要求正确、已绑定的依据和具体定位。工具不证明读者身份或隔离真实，评分者也不得编辑回答文件。只更新本批 claim 页的来源记录，保留运行观察、其他页和旧基线。Agent 核对入口状态，运行 check，同步摘要并继续下一批。
 
 复核者、读者和评分者分别填写工具生成的对应模板，保留 ID 和字段结构；pending / unavailable 是未完成状态，不能直接提交为通过。模板不能代替实际报告，不需要再次写转换脚本。
 
@@ -114,6 +123,6 @@ finish 检查源码、题目和页面仍为同一版本，从 answers.json 直�
 
 局部复验时 prepare 可重复传 `--scenario <ID>`；失败／未完成题必须选入，未选题必须原先 passed。源码复核反馈 retained 按未选 ID 给出本次具体 diff 核对理由；finish 保留原阅读答案与历史时间说明，记录本次确认时间，不伪称重新独立阅读。
 
-若具体 diff 表明所有题的业务答案、依据与定位均不受影响，可用 prepare 的 `--retain-all`。仍须独立源码核对并逐题填写 retained；seal 的 reader_required 为 false 时，评分文件为 `{"scenarios": []}`，finish 使用原 reader 声明并保留全部历史阅读及已有指纹。任何题有影响、失败或缺乏真实独立阅读证据就不能走此路径。
+若具体 diff 表明所有题的业务答案、依据与定位均不受影响，可用 prepare 的 `--retain-all`。仍须独立源码核对并逐题填写 retained；seal 的 reader_required 为 false 时，评分文件为 `{"scenarios": []}`，finish 使用原 reader 声明并保留全部历史阅读及已有指纹。已知失败、未答项、定位被补写、答案指纹冲突或缺乏真实独立阅读证据不能保留。旧 V3 缺增补字段时对照实际报告，区分有效、明确冲突与无法确认：有效题不为升级重新阅读，不补造 context 或原始指纹；冲突题选入局部复验，无法确认项如实留在交付边界，不以间接佐证背书。
 
 每次修订使用新 session；工具发现版本变化就拒绝保存，不自动刷新旧证据。工具不可用时按[格式契约](schema.md)手工记录实际时钟和版本、冻结阅读材料，并说明 automated check unavailable，不能编造验收过程。

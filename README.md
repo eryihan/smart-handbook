@@ -69,7 +69,9 @@ codex plugin add smart-handbook@smart-handbook
 
 页面中的 claim 将关键结论关联到实现、SQL、配置或异步交接代码，并标明资源类型和证据角色。入口进度引用实际验收记录，模块与全量进度从有效记录汇总；文件已归属或页面已创建不代表业务已分析。
 
-代码或手册变化后，旧验收进入待复核，update 根据差异修订并复验。当前格式版本为 3，不兼容旧格式；旧产物需通过 init 重新建立，不自动迁移。
+代码或手册变化后，旧验收进入待复核，update 根据差异修订并复验。当前格式版本为 3；更早的 schema 不自动迁移。V3 的已有页面、指纹、基线和验收继续保留，新增字段缺失只进入对应核对范围，不触发全量重建。
+
+升级 Skill 并让会话加载新版后，已有 V3 手册使用 `handbook update 核对新版要求，保留有效结果，只修复受影响业务`（Claude Code 对应 `/smart-handbook:update`）。先确认入口粒度与证据，再修订缺项、局部复验；无需删除 `.smart-handbook/`、反复安装或重新跑全量 init。后续仍按实际代码变化和内容问题使用 update。
 
 业务内容与证据要求见[接口分析与内容验收](references/endpoint-analysis.md)，全量发现和进度见[清单标准](references/project-inventory.md)，独立读者能否理解业务由[阅读验收](references/reading-review.md)核对。
 
