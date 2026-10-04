@@ -39,10 +39,13 @@ class ReviewToolTest(unittest.TestCase):
         value.update(changes)
         return review.seal(self.root, self.session, value)
 
-    def feedback(self, failed=False):
+    def feedback(self, failed=False, session=None):
         case = self.fixture.record["scenarios"][0]
-        return {"reader": self.fixture.record["reader"], "scenarios": [{
-            "id": case["id"], "reading": copy.deepcopy(case["reading"]),
+        raw = {"reader": self.fixture.record["reader"], "scenarios": [{
+            "id": case["id"], "reading": copy.deepcopy(case["reading"])}]}
+        (session or self.session).joinpath("reader/answers.json").write_text(json.dumps(raw))
+        return {"scenarios": [{
+            "id": case["id"],
             "verdict": "failed" if failed else "passed", "assessment": "Actual feedback fixture"}]}
 
     def project_bytes(self):
@@ -247,7 +250,7 @@ class ReviewToolTest(unittest.TestCase):
                   "findings": [], "retained": {}}
         Path(prepared["source_feedback"]).write_text(json.dumps(source), encoding="utf-8")
         invoke("seal", "--session", str(session), "--result", prepared["source_feedback"])
-        Path(prepared["graded_feedback"]).write_text(json.dumps(self.feedback()), encoding="utf-8")
+        Path(prepared["graded_feedback"]).write_text(json.dumps(self.feedback(session=session)), encoding="utf-8")
         invoke("finish", "--session", str(session), "--result", prepared["graded_feedback"])
         inventory = review.read(self.root / hb.INVENTORY_PATH)
         self.assertEqual(inventory["units"][0]["entrypoints"][0]["status"], "needs-review")
@@ -517,7 +520,7 @@ class ReviewToolTest(unittest.TestCase):
         review.prepare(self.root, self.relative, self.session, retain_all=True)
         result = self.seal(retained={"approve-normal": "One trailing newline; rule, H2 and method unchanged"})
         self.assertFalse(result["reader_required"])
-        review.finish(self.root, self.session, {"reader": self.fixture.record["reader"], "scenarios": []})
+        review.finish(self.root, self.session, {"scenarios": []})
         record = review.read(self.root / self.relative)
         self.assertEqual(record["scenarios"][0]["reading"], self.fixture.record["scenarios"][0]["reading"])
         self.assertIn("Retained reading at 2026-10-01T10:01:00Z", record["scenarios"][0]["assessment"])
@@ -541,6 +544,158 @@ class ReviewToolTest(unittest.TestCase):
         self.seal()
         review.finish(self.root, self.session, self.feedback())
         self.assertEqual(f.check()["inventory"]["next_entries"], ["second-entry"])
+
+    def test_grader_cannot_supply_a_replacement_answer_or_location(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        grade["scenarios"][0]["reading"] = copy.deepcopy(self.fixture.record["scenarios"][0]["reading"])
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "cannot replace reading"):
+            review.finish(self.root, self.session, grade)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_failed_reading_preserves_wrong_location_and_unbound_page(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback(failed=True)
+        raw_path = self.session / "reader/answers.json"
+        raw = review.read(raw_path)
+        reading = raw["scenarios"][0]["reading"]
+        reading["answer"] = "The handbook only identifies a class; I cannot find the handler"
+        reading["locations"] = [{"path": self.fixture.source, "symbol": "ApprovalService"}]
+        reading["evidence"] = [{"page": self.fixture.flow, "section": "Missing section"}]
+        raw_path.write_text(json.dumps(raw))
+        review.finish(self.root, self.session, grade)
+        case = review.read(self.root / self.relative)["scenarios"][0]
+        self.assertEqual(case["reading"], reading)
+        self.assertEqual(case["verdict"], "failed")
+        self.assertEqual(case["reading_fingerprint"], hb.reading_fingerprint(reading))
+        self.assertNotIn("review-invalid", self.fixture.codes(self.fixture.check()))
+        self.assertFalse(self.fixture.check()["inventory"]["ready_to_complete"])
+
+    def test_missing_reader_location_cannot_be_passed_by_grading(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        raw_path = self.session / "reader/answers.json"
+        raw = review.read(raw_path)
+        raw["scenarios"][0]["reading"]["locations"] = []
+        raw_path.write_text(json.dumps(raw))
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "code location"):
+            review.finish(self.root, self.session, grade)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_saved_answer_or_evidence_edit_invalidates_original_feedback_binding(self):
+        self.prepare()
+        self.seal()
+        review.finish(self.root, self.session, self.feedback())
+        path = self.root / self.relative
+        record = review.read(path)
+        record["scenarios"][0]["reading"]["locations"] = [{"path": self.fixture.source, "line": 2}]
+        path.write_text(json.dumps(record))
+        result = self.fixture.check()
+        self.assertIn("review-invalid", self.fixture.codes(result))
+        self.assertFalse(result["inventory"]["ready_to_complete"])
+
+    def test_failed_answer_still_cannot_reference_an_outside_path(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback(failed=True)
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        raw["scenarios"][0]["reading"]["locations"] = [{"path": "../outside.java", "line": 1}]
+        path.write_text(json.dumps(raw))
+        before = self.project_bytes()
+        with self.assertRaises(ValueError):
+            review.finish(self.root, self.session, grade)
+        self.assertEqual(before, self.project_bytes())
+
+    def test_reader_output_requires_every_selected_id_without_duplicates(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        for cases in ([], raw["scenarios"] * 2):
+            path.write_text(json.dumps(dict(raw, scenarios=cases)))
+            with self.assertRaisesRegex(ValueError, "exactly the selected"):
+                review.finish(self.root, self.session, grade)
+
+    def test_explicit_dependency_page_binds_its_sources_and_only_bound_pages_are_readable(self):
+        f = self.fixture
+        f.change_meta(f.flow, claims=[{"id": "shared-config", "section": "正常路径与模块交接",
+                                     "sources": [{"path": "config/application.yml"}]}])
+        result = review.prepare(self.root, self.relative, self.session, pages=[f.flow])
+        packet = review.read(self.session / "packet.json")
+        self.assertIn(f.flow, packet["record"]["pages"])
+        self.assertIn("config/application.yml", packet["record"]["sources"])
+        self.assertFalse((self.session / "reader/.smart-handbook/README.md").exists())
+        self.assertTrue(Path(result["reader_feedback"]).is_file())
+        self.seal()
+        (self.root / f.flow).write_text((self.root / f.flow).read_text() + "\nchanged shared rule")
+        with self.assertRaisesRegex(ValueError, "version changed"):
+            review.finish(self.root, self.session, self.feedback())
+
+    def test_unrelated_page_error_is_deferred_but_global_check_still_reports_it(self):
+        f = self.fixture
+        f.change_meta(f.flow, claims=[{"id": "unfinished-database", "section": "正常路径与模块交接",
+                                     "resource_types": ["database"], "sources": [{"path": f.source}]}])
+        result = self.prepare()
+        self.assertTrue(any(i["code"] == "claim-evidence-incomplete" for i in result["deferred_issues"]))
+        self.seal()
+        review.finish(self.root, self.session, self.feedback())
+        self.assertIn("claim-evidence-incomplete", f.codes(f.check()))
+
+    def test_bound_dependency_page_error_blocks_preparation(self):
+        f = self.fixture
+        f.change_meta(f.flow, claims=[{"id": "unfinished-database", "section": "正常路径与模块交接",
+                                     "resource_types": ["database"], "sources": [{"path": f.source}]}])
+        with self.assertRaisesRegex(ValueError, "claim-evidence-incomplete"):
+            review.prepare(self.root, self.relative, self.session, pages=[f.flow])
+        self.assertFalse(self.session.exists())
+
+    def test_unrelated_missing_review_does_not_block_current_batch(self):
+        f = self.fixture
+        f.change_meta(f.flow, claims=[{"id": "second-claim", "section": "正常路径与模块交接",
+                                     "sources": [{"path": f.source}]}])
+        f.inventory["units"][0]["entrypoints"].append({
+            "id": "second-entry", "path": f.source, "line": 2, "trigger": "independent fixture action",
+            "status": "needs-review", "claims": ["second-claim"], "gaps": [],
+            "reviews": [".smart-handbook/.reviews/not-created.json"]})
+        f.save_inventory()
+        result = self.prepare()
+        self.assertTrue(any(i["code"] == "review-invalid" for i in result["deferred_issues"]))
+        self.seal()
+        review.finish(self.root, self.session, self.feedback())
+        self.assertIn("review-invalid", f.codes(f.check()))
+
+    def test_global_duplicate_claim_cannot_be_deferred(self):
+        f = self.fixture
+        f.change_meta(f.flow, claims=[{"id": "approval-01", "section": "正常路径与模块交接",
+                                     "sources": [{"path": f.source}]}])
+        with self.assertRaises(ValueError):
+            self.prepare()
+        self.assertFalse(self.session.exists())
+
+    def test_retained_review_preserves_saved_original_reading_fingerprint(self):
+        self.prepare()
+        self.seal()
+        review.finish(self.root, self.session, self.feedback())
+        original = review.read(self.root / self.relative)["scenarios"][0]
+        path = self.root / self.fixture.module
+        path.write_text(path.read_text() + "\n")
+        session = Path(self.temporary.name) / "retained-session"
+        review.prepare(self.root, self.relative, session, retain_all=True)
+        review.seal(self.root, session, {"status": "passed", "isolation": "independent",
+            "description": "synthetic retained source feedback", "findings": [],
+            "retained": {original["id"]: "Only trailing newline changed; answer, H2 and handler are unchanged"}})
+        review.finish(self.root, session, {"scenarios": []})
+        retained = review.read(self.root / self.relative)["scenarios"][0]
+        self.assertEqual(retained["reading"], original["reading"])
+        self.assertEqual(retained["reading_fingerprint"], original["reading_fingerprint"])
+        self.assertTrue(self.fixture.check()["inventory"]["ready_to_complete"])
 
 
 if __name__ == "__main__":

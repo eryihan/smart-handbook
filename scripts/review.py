@@ -120,6 +120,7 @@ def pending(record):
     record["reader"] = {"isolation": "unavailable", "description": "Awaiting independent reading"}
     for case in record["scenarios"]:
         case.update(reading=empty_reading(), verdict="pending", assessment="", reviewed_at=None)
+        case.pop("reading_fingerprint", None)
 
 
 def plan_check(book, relative, record):
@@ -209,11 +210,30 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
     pending(probe)
     probe.update(prepared_at=None, sources={}, pages={})
     plan_check(book, relative, probe)
+    relevant_pages = set(scope_record["pages"]) | set(pages or [])
+    relevant_pages.update(book.claims[c][0] for e in scope for c in book.entries[e]["claims"])
+    if not relevant_pages <= book.pages.keys():
+        raise ValueError("Unknown authoritative page")
+    related_entries = scope | {e for e, entry in book.entries.items()
+                               if any(book.claims[c][0] in relevant_pages for c in entry["claims"])}
+    related_reviews = {r for e in related_entries for r in book.entries[e]["reviews"]}
     result = book.check()
-    # Old feedback may be invalidated by this revision; unrelated structural errors still block preparation.
-    errors = [i for i in result["issues"] if i["level"] == "error"
-              and not (i["code"] == "review-invalid" and i["path"] == relative)
-              and not (i["code"] == "entry-review-incomplete" and i["message"].split(":", 1)[0] in scope)]
+    # Global identity/path/state failures remain blocking; unrelated work stays visible for final check.
+    global_codes = {"unsafe-path", "handbook-missing", "page-missing", "state-invalid",
+                    "inventory-missing", "inventory-invalid", "page-id-duplicate", "claim-id-duplicate"}
+    errors, deferred = [], []
+    for issue in result["issues"]:
+        if issue["level"] != "error":
+            continue
+        code, path = issue["code"], issue["path"]
+        entry_id = issue["message"].split(":", 1)[0]
+        if ((code == "review-invalid" and path == relative)
+                or (code == "entry-review-incomplete" and entry_id in scope)):
+            continue  # This revision is repairing its previous feedback.
+        blocking = (code in global_codes or path in relevant_pages
+                    or (code == "review-invalid" and path in related_reviews)
+                    or (code == "entry-review-incomplete" and entry_id in related_entries))
+        (errors if blocking else deferred).append(issue)
     if errors or book.inventory is None:
         raise ValueError("Fix handbook structure before review: " + encode(errors))
     record = copy.deepcopy(scope_record)
@@ -226,14 +246,11 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
         entry = book.entries[entry_id]
         sources.add(entry["path"])
         sources.update(s["path"] for c in entry["claims"] for s in book.claims[c][1]["sources"])
+    sources.update(s["path"] for p in relevant_pages for c in book.pages[p]["metadata"]["claims"]
+                   for s in c["sources"])
     record["sources"] = {p: book.file_digest(p) for p in sorted(sources)}
-    # Bind only authoritative context; navigation progress changes must not invalidate every batch.
-    relevant_pages = set(scope_record["pages"]) | set(pages or [])
-    relevant_pages.update(book.claims[c][0] for e in scope for c in book.entries[e]["claims"])
-    if not relevant_pages <= book.pages.keys():
-        raise ValueError("Unknown authoritative page")
     record["pages"] = {p: book.file_digest(p) for p in sorted(relevant_pages)}
-    frozen_pages = {p: book.file_digest(p) for p in sorted(book.pages)}
+    frozen_pages = dict(record["pages"])
     plan_check(book, relative, record)
     ids = {c["id"] for c in record["scenarios"]}
     if retain_all and selected:
@@ -297,16 +314,20 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
     (session / "packet.json").write_text(encode(packet), encoding="utf-8")
     source_template = {"status": "pending", "isolation": "unavailable", "description": "Awaiting actual source feedback",
                        "findings": [], "retained": {i: "" for i in sorted(omitted)}}
-    graded_template = {"reader": {"isolation": "unavailable", "description": "Awaiting actual independent reader"},
-                       "scenarios": [{"id": i, "reading": empty_reading(), "verdict": "pending", "assessment": ""}
+    reader_template = {"reader": {"isolation": "unavailable", "description": "Awaiting actual independent reader"},
+                       "scenarios": [{"id": i, "reading": empty_reading()} for i in sorted(chosen)]}
+    (session / "reader/answers.json").write_text(encode(reader_template), encoding="utf-8")
+    graded_template = {"scenarios": [{"id": i, "verdict": "pending", "assessment": ""}
                                      for i in sorted(chosen)]}
     for name, value in (("source-feedback.json", source_template), ("graded-feedback.json", graded_template)):
         (session / name).write_text(encode(value), encoding="utf-8")
     return {"session": str(session), "source_packet": str(session / "packet.json"),
             "source_task": str(session / "source-task.json"),
             "reader_directory": str(session / "reader"), "questions": len(questions),
+            "reader_feedback": str(session / "reader/answers.json"),
             "source_feedback": str(session / "source-feedback.json"),
             "graded_feedback": str(session / "graded-feedback.json"),
+            "deferred_issues": deferred,
             "next": "Independent source review; do not start the reader before seal passes"}
 
 
@@ -399,18 +420,28 @@ def finish(root, session, feedback):
     source = read(session / "source.json")
     if source["source_review"]["status"] != "passed":
         raise ValueError("Source review did not pass; repair before independent reading")
-    if set(feedback) != {"reader", "scenarios"}:
-        raise ValueError("Reading feedback requires reader and scenarios")
+    if set(feedback) != {"scenarios"}:
+        raise ValueError("Grading requires only scenarios; reader answers must stay in reader/answers.json")
     supplied = feedback["scenarios"]
-    if not isinstance(supplied, list) or any(not isinstance(c, dict) or set(c) != {"id", "reading", "verdict", "assessment"} for c in supplied):
-        raise ValueError("Each graded answer requires id, reading, verdict and assessment")
+    if not isinstance(supplied, list) or any(not isinstance(c, dict) or set(c) != {"id", "verdict", "assessment"} for c in supplied):
+        raise ValueError("Each grade requires id, verdict and assessment; grading cannot replace reading")
     answers = {c["id"]: c for c in supplied}
     if len(answers) != len(supplied) or set(answers) != set(packet["selected"]):
         raise ValueError("Reading feedback must cover exactly the selected questions")
+    raw = read(session / "reader/answers.json")
+    if set(raw) != {"reader", "scenarios"}:
+        raise ValueError("Reader output requires reader and scenarios")
+    checked(raw["reader"], book.review_schema["properties"]["reader"] | {"$defs": book.review_schema["$defs"]})
+    if not isinstance(raw["scenarios"], list) or any(not isinstance(c, dict) or set(c) != {"id", "reading"}
+                                                   for c in raw["scenarios"]):
+        raise ValueError("Reader answers require id and original reading")
+    readings = {c["id"]: c["reading"] for c in raw["scenarios"]}
+    if len(readings) != len(raw["scenarios"]) or set(readings) != set(packet["selected"]):
+        raise ValueError("Reader output must cover exactly the selected questions")
     record = packet["record"]
     record.update({k: source[k] for k in ("source_review", "source_reviewed_at")})
-    record["reader"] = copy.deepcopy(feedback["reader"])
-    if source["retained"] and packet["original"]["reader"] != feedback["reader"]:
+    record["reader"] = copy.deepcopy(raw["reader"] if packet["selected"] else packet["original"]["reader"])
+    if source["retained"] and packet["original"]["reader"] != record["reader"]:
         record["reader"]["description"] += "; retained answers: " + packet["original"]["reader"]["description"]
     original = {c["id"]: c for c in packet["original"]["scenarios"]}
     timestamp = now()
@@ -418,7 +449,9 @@ def finish(root, session, feedback):
         prior = original[case["id"]]
         if case["id"] in answers:
             answer = answers[case["id"]]
-            case.update({k: answer[k] for k in ("reading", "verdict", "assessment")})
+            case.update({k: answer[k] for k in ("verdict", "assessment")})
+            case["reading"] = copy.deepcopy(readings[case["id"]])
+            case["reading_fingerprint"] = hb.reading_fingerprint(case["reading"])
             if case["verdict"] not in ("passed", "failed"):
                 raise ValueError("Finish requires actual grading")
             if prior["verdict"] != "pending":
@@ -426,6 +459,8 @@ def finish(root, session, feedback):
                                       + ": " + prior["assessment"] + "\nRecheck: " + case["assessment"])
         else:
             case.update({k: prior[k] for k in ("reading", "verdict")})
+            if "reading_fingerprint" in prior:
+                case["reading_fingerprint"] = prior["reading_fingerprint"]
             case["assessment"] = (prior["assessment"] + "\nRetained reading at " + str(prior["reviewed_at"])
                                   + "; confirmed at " + timestamp + ": " + source["retained"][case["id"]])
         case["reviewed_at"] = timestamp

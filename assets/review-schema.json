@@ -317,6 +317,10 @@
             }
           }
         },
+        "reading_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
         "verdict": {
           "enum": [
             "pending",

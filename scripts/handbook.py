@@ -63,6 +63,12 @@ def review_input_fingerprint(record):
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def reading_fingerprint(reading):
+    """Bind the saved answer, citations and locations without changing their contents."""
+    raw = json.dumps(reading, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def validate(value, schema, document, location="$", errors=None):
     """Validate the subset of JSON Schema used by the bundled schemas."""
     if errors is None:
@@ -497,16 +503,24 @@ class Handbook:
             for entry_id in scenario["entrypoints"]:
                 entry_ref(entry_id)
             source_refs(scenario["expected"]["sources"])
-            for source in scenario["reading"]["locations"]:
-                source_refs([source])
-                if not source.get("symbol") and not source.get("line"):
-                    raise ValueError("Reading location requires symbol or line")
-                if source["path"].endswith(".java") and "#" not in source.get("symbol", "") and "line" not in source:
-                    raise ValueError("Reading location must identify a handler, not just a Java class")
+            if "reading_fingerprint" in scenario and scenario["reading_fingerprint"] != reading_fingerprint(scenario["reading"]):
+                raise ValueError("Saved reading differs from its original feedback fingerprint")
+            for locator in scenario["reading"]["locations"]:
+                safe_path(self.root, locator["path"])
             for evidence in scenario["reading"]["evidence"]:
-                page = evidence["page"]
-                if page not in record["pages"] or evidence["section"] not in self.pages[page]["sections"]:
-                    raise ValueError("Reading evidence requires a fingerprinted page and real H2: " + page)
+                safe_path(self.root, evidence["page"])
+            # Failed answers must preserve incorrect or missing citations/locations as evidence of failure.
+            if scenario["verdict"] == "passed":
+                for source in scenario["reading"]["locations"]:
+                    source_refs([source])
+                    if not source.get("symbol") and not source.get("line"):
+                        raise ValueError("Reading location requires symbol or line")
+                    if source["path"].endswith(".java") and "#" not in source.get("symbol", "") and "line" not in source:
+                        raise ValueError("Reading location must identify a handler, not just a Java class")
+                for evidence in scenario["reading"]["evidence"]:
+                    page = evidence["page"]
+                    if page not in record["pages"] or evidence["section"] not in self.pages[page]["sections"]:
+                        raise ValueError("Reading evidence requires a fingerprinted page and real H2: " + page)
             if scenario["verdict"] != "pending":
                 if not record["source_reviewed_at"] or not scenario["reviewed_at"] or not scenario["assessment"].strip():
                     raise ValueError("A verdict requires actual source/review times and assessment")
@@ -576,6 +590,7 @@ class Handbook:
                     # A grouped record cannot certify sources belonging only to an unfinished peer.
                     verified_sources.update(sources)
                     verified_sources.update(s["path"] for case in cases for s in case["expected"]["sources"])
+                    verified_sources.update(s["path"] for case in cases for s in case["reading"]["locations"])
                     verified_sources.update(s["path"] for r in records
                                             for exclusion in r["not_applicable"].get(entry_id, {}).values()
                                             for s in exclusion["sources"])
@@ -589,6 +604,9 @@ class Handbook:
                 sources = set(unit["sources"]) | {e["path"] for e in unit["entrypoints"]}
                 sources.update(s["path"] for e in unit["entrypoints"] for c in e["claims"]
                                for s in self.claims[c][1]["sources"])
+                if not unit["entrypoints"]:
+                    sources.update(s["path"] for p in unit["pages"] for c in self.pages[p]["metadata"]["claims"]
+                                   for s in c["sources"])
                 supported = bool(sources) and sources <= verified_sources
                 if unit["gaps"] or "known-gap" in statuses:
                     status = "known-gap"
@@ -601,7 +619,8 @@ class Handbook:
                 else:
                     status = "pending"
                 units[unit["id"]] = {"status": status, "pages": unit["pages"],
-                                     "entrypoints": [e["id"] for e in unit["entrypoints"]]}
+                                     "entrypoints": [e["id"] for e in unit["entrypoints"]],
+                                     "unverified_sources": sorted(sources - verified_sources)}
         return states, units
 
     def inventory_candidates(self, changed):

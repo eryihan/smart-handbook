@@ -295,6 +295,45 @@ class HandbookTest(unittest.TestCase):
         self.assertIn("inventory-completion-conflict", self.codes(result))
         self.assertEqual(result["inventory"]["status"], "incomplete")
 
+    def test_shared_unit_without_sources_uses_its_page_claims(self):
+        self.inventory["units"].append({"id": "shared-rule", "name": "shared fixture",
+            "entrypoints": [], "pages": [self.module], "sources": [], "depends_on": [], "gaps": []})
+        self.save_inventory()
+        result = self.check()["inventory"]
+        self.assertEqual(result["units"]["shared-rule"]["status"], "accepted")
+        self.assertEqual(result["units"]["shared-rule"]["unverified_sources"], [])
+
+    def test_shared_page_fingerprints_alone_do_not_certify_unused_source(self):
+        self.change_meta(self.flow, claims=[{"id": "shared-config", "section": "正常路径与模块交接",
+                                            "sources": [{"path": "config/application.yml"}]}])
+        self.inventory["units"].append({"id": "shared-rule", "name": "shared fixture",
+            "entrypoints": [], "pages": [self.flow], "sources": [], "depends_on": [], "gaps": []})
+        self.save_inventory()
+        self.record["sources"]["config/application.yml"] = hb.fingerprint(self.root / "config/application.yml")
+        self.record["pages"][self.flow] = hb.fingerprint(self.root / self.flow)
+        self.save_review()
+        result = self.check()["inventory"]
+        self.assertEqual(result["units"]["shared-rule"]["status"], "needs-review")
+        self.assertEqual(result["units"]["shared-rule"]["unverified_sources"], ["config/application.yml"])
+        self.assertFalse(result["ready_to_complete"])
+
+    def test_reader_cited_shared_source_can_supply_its_verified_usage_evidence(self):
+        self.change_meta(self.flow, claims=[{"id": "shared-config", "section": "正常路径与模块交接",
+                                            "sources": [{"path": "config/application.yml"}]}])
+        self.inventory["units"].append({"id": "shared-rule", "name": "shared fixture",
+            "entrypoints": [], "pages": [self.flow], "sources": [], "depends_on": [], "gaps": []})
+        self.save_inventory()
+        self.record["sources"]["config/application.yml"] = hb.fingerprint(self.root / "config/application.yml")
+        self.record["pages"][self.flow] = hb.fingerprint(self.root / self.flow)
+        self.record["scenarios"][0]["reading"]["locations"].append({"path": "config/application.yml", "line": 1})
+        self.save_review()
+        result = self.check()["inventory"]
+        self.assertEqual(result["units"]["shared-rule"]["status"], "accepted")
+        self.record["scenarios"][0]["verdict"] = "failed"
+        self.save_review()
+        result = self.check()["inventory"]
+        self.assertEqual(result["units"]["shared-rule"]["status"], "needs-review")
+
     def test_review_paths_and_expected_answers_cannot_escape_repository(self):
         self.inventory["units"][0]["entrypoints"][0]["reviews"] = ["../outside.json"]
         self.save_inventory()
