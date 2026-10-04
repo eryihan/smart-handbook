@@ -80,7 +80,7 @@ path、range、map.page 与机器记录使用仓库相对 POSIX 路径。禁止�
 
 来源角色为 implementation / persistence / configuration / handoff / definition。database 结论需要实现与持久化映射；Redis、MQ、ES、RPC、HTTP 需要使用实现与决定行为的配置；async 需要实现与交接证据。本仓库有接收方时 handoff 引用接收实现；接收方在仓库外时引用可见的客户端或协议交接边界，远端内部与最终结果未知须明确，不能用外部边界跳过本地消费或回写。一文件可有多个角色，例如注解 SQL 或代码常量，按实际内容标记。脚本核对已声明角色是否齐全，不判断内容是否真实支持结论。
 
-来源内容和指纹要求见[证据与来源指纹](endpoint-analysis.md#证据与来源指纹)。业务资料、历史方案和注释用于背景；当前行为需要实际实现。测试存在不代表已执行，运行观察另记环境、版本、时间、方法和结果，不伪装成源码路径。
+来源内容和指纹要求见[证据与来源指纹](endpoint-analysis.md#证据与来源指纹)。业务资料、历史方案和注释用于背景；当前行为需要实际实现。测试存在不代表已执行，运行观察另记环境、版本、时间、方法和结果，不伪装成源码路径。测试通过数量不能直接折算为页面 verified；需对应具体业务断言，保留实际执行结果及外部 mock／未覆盖范围。
 
 symbol 定位为保守 Java 文本检查，支持类型名和简单 `Type#method(SimpleType, int)`，不解析 AST / 调用图。复杂泛型、注解、varargs、多类型文件和其他语言返回 symbol-unverified，交由 Agent 核对；明确缺类型或方法报 symbol-broken。已验收入口与场景定位在指纹未变时核对明显缺失的方法及越界行号；源码已变时旧定位进入待复核，不能用当前文件否定历史位置。
 
@@ -120,6 +120,8 @@ source_checked_at 使用工具取得的实际时间并带时区。历史运行�
 
 expected 包含 answer 和 sources（path，可选 symbol / line）。reading 包含 status（pending / answered / unavailable）、answer、evidence（page + 实际 H2 section）、locations（源码 path + symbol 或 line）。verdict 为 pending / passed / failed，已判定时填写具体 assessment 与实际 reviewed_at。
 
+finish 从读者直接填写的 answers.json 取 reading，评分文件仅含判定与理由；新增的 reading_fingerprint 绑定该题完整阅读结果，check 检测保存后的答案、依据和定位变动。该字段是 V3 的可选补充，旧记录可读取，但没有绑定或实际原报告时不能证明其反馈未被改写。failed 保留错误定位及未绑定依据；这些内容不提供验收证明，也不作为已验证来源。passed 仍要求依据与具体代码位置有效且已绑定。
+
 源码答案引用该入口的实现，来源必须存在于 snapshots 与清单。阅读依据引用已保存指纹的页面。场景关联的每个入口反向引用该记录，避免用其他业务的报告充当验收；accepted 入口的处理路径、claim 来源和关联页面都需被指纹覆盖。
 
 尚未准备的草稿（prepared_at / source_reviewed_at 为 null、源码核对和全部阅读／判定均 pending）允许 sources / pages 暂空，来源仍须属于清单、范围关联仍需有效。它不提供验收证明，也不应阻塞其他批次；prepare 后和已判定记录必须满足完整快照约束。
@@ -152,7 +154,7 @@ python3 <skill-directory>/scripts/handbook.py check --root <project-directory> -
 python3 <skill-directory>/scripts/handbook.py impact --root <project-directory> --base <commit> --target worktree --format json
 ```
 
-check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、next_entries、changed_files、unknown_files、related_units。next_entries 是未验收入口 ID，供 init 继续选择批次；单元来源使用声明来源与入口已有证据，不要求重复登记。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
+check 返回页面状态及 inventory 的 recorded_status、派生 status、ready_to_complete、entries、units、next_entries、changed_files、unknown_files、related_units。next_entries 是未验收入口 ID，供 init 继续选择批次；单元同时返回 unverified_sources，无入口单元自动纳入其页面 claim 来源。单元来源使用声明来源与入口已有证据，不要求重复登记。缺资源角色、验收不完整、错误关联或完成记录冲突报 error，快照变化报待复核。
 
 impact 返回 changed_files、renames、direct_claims、previous_pages、related_modules、related_flows、related_units、related_entries、review_candidates、unowned_changes。根据 claim、范围、流程和清单依赖给候选；review_candidates 包含旧验收失效的入口，即使业务代码零 diff。
 

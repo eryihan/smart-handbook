@@ -10,7 +10,7 @@ init 的全量发现与续跑、update 的影响分析、audit 的覆盖检查�
 
 发现入口后继续展开可执行动作：同一 Controller 的查询、保存、撤销分别处置；消息分发、任务、回调及配置选择的处理器按实际分支追踪。类名和路由前缀可辅助发现，不能用它们替代具体处理入口。入口可使用方法、函数或脚本行号定位，业务 ID 与命名由 Agent 决定。
 
-初步发现的类／路由前缀保留 pending，分析前展开为具体动作并核对遗漏的方法。某个代表方法不能替代同类其他动作；README 说明当前计数是已登记动作还是仍含候选，不能把类数当作接口总数。发现及拆分由 Agent 按实际代码处理，脚本不按固定注解或命名替项目分组。
+初步发现的类／路由前缀保留 pending，分析前展开为具体动作并核对遗漏的方法。某个代表方法不能替代同类其他动作；没有处理动作的空壳类按支撑文件登记，不虚构业务入口。README 说明当前计数是已登记动作还是仍含候选，不能把类数当作接口总数。发现及拆分由 Agent 按实际代码处理，脚本不按固定注解或命名替项目分组。
 
 共用逻辑可以合并编写与验收，但逐入口列明使用方、适用条件和差异，核对权限、数据操作、生效、失败和副作用确实一致。一个入口已分析不能代表整个目录；“模板同构”“都是查算写”不足以省略其他业务。
 
@@ -34,9 +34,9 @@ init 的全量发现与续跑、update 的影响分析、audit 的覆盖检查�
 
 每个入口包含 `id`、`path`、`symbol` 或 `line`、`trigger`、`status`、`claims`、`gaps`、`reviews`。ID 全库唯一；trigger 描述实际路由、订阅、事件、调度或其他调用方式。claims 引用页面 claim ID，reviews 引用 `.smart-handbook/.reviews/*.json`，不重复保存规则与验收总结。
 
-入口状态为 pending / analysing / needs-review / accepted / known-gap。导航入口保持 pending；关键本地逻辑未查清记录 gaps，使用 known-gap。accepted 必须关联已写清的业务 claim，完成[源码复核和独立阅读](reading-review.md)，没有关键本地缺口。
+入口状态为 pending / analysing / needs-review / accepted / known-gap。导航入口保持 pending；关键本地逻辑未查清记录 gaps，使用 known-gap。页面列出的本地数据操作、接收方或失败分支缺口须同步到对应入口／单元，不能一边声明未查清、一边 accepted。accepted 必须关联已写清的业务 claim，完成[源码复核和独立阅读](reading-review.md)，没有关键本地缺口。
 
-单元的 sources 保存需要追踪的支撑实现、映射和配置，不等于目录内全部文件；新增发现持续补充。没有独立执行入口的公共组件由使用方的 claim 与场景复核，不虚构入口。其声明来源仍需被已验收业务的证据覆盖。
+单元的 sources 保存需要追踪的支撑实现、映射和配置，不等于目录内全部文件；新增发现持续补充。没有独立执行入口的公共组件由使用方的 claim 与场景复核，不虚构入口。check 自动纳入其页面 claim 来源；使用方须引用实际公共实现，只有记录指纹、写“已由其他模块验收”或放导航链接不足以提供覆盖。缺失来源通过单元的 unverified_sources 返回。
 
 单元不手填 status / review，check 从入口、缺口和证据派生。入口 claim 来源会自动加入单元的验收证据范围，sources 只需额外登记公共实现／独立资源，不重复抄入口证据。页面复核也不在 state 中独立填写。README 使用 check 派生结果汇总，标明实际版本和未完成范围。
 
@@ -63,4 +63,4 @@ full 保存 complete 前必须确认：
 
 navigation 的 complete 仅表示声明的导航任务结束。用户明确限定范围时只报告该范围完成，不能升级成全库完成。
 
-check 返回入口与单元派生状态、ready_to_complete、来源与验收快照变化；impact 给出来源和依赖候选及旧验收待复核项。脚本不发现未登记代码、不验证答案真假；Agent 继续负责遗漏发现与源码语义核对。
+check 返回入口与单元派生状态、ready_to_complete、来源与验收快照变化；impact 给出来源和依赖候选及旧验收待复核项。next_entries 为空但 ready_to_complete 为 false 时继续查看单元 gaps、unverified_sources 与发现记录，不能认定初始化已完成或自行解释成工具误报。脚本不发现未登记代码、不验证答案真假；Agent 继续负责遗漏发现与源码语义核对。
