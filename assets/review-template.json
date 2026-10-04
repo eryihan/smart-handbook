@@ -18,6 +18,7 @@
   "source_review": {
     "status": "pending",
     "isolation": "unavailable",
+    "context": "unavailable",
     "description": "尚未独立核对源码答案与不适用理由",
     "input_fingerprint": null,
     "findings": []

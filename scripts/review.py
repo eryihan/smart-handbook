@@ -73,6 +73,8 @@ def plan_report(book, relative, record):
             issue("plan-entry", path, "Unknown entry: " + entry_id)
             continue
         entry = book.entries[entry_id]
+        if entry.get("kind") != "action":
+            issue("plan-action", path, "Confirm or expand the concrete action before review: " + entry_id)
         tested = {t for c in record["scenarios"] if entry_id in c["entrypoints"] for t in c["topics"]}
         excluded = set(record["not_applicable"].get(entry_id, {}))
         missing, conflict = hb.REVIEW_TOPICS - (tested | excluded), tested & excluded
@@ -109,12 +111,13 @@ def record_path(root, relative):
 
 
 def empty_reading():
-    return {"status": "pending", "answer": "", "evidence": [], "locations": []}
+    return {"status": "pending", "answer": "", "unanswered": [], "evidence": [], "locations": []}
 
 
 def pending(record):
     record["source_reviewed_at"] = None
     record["source_review"] = {"status": "pending", "isolation": "unavailable",
+                               "context": "unavailable",
                                "description": "Awaiting independent source review",
                                "input_fingerprint": None, "findings": []}
     record["reader"] = {"isolation": "unavailable", "description": "Awaiting independent reading"}
@@ -262,6 +265,13 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
     omitted = ids - chosen
     if any(original[i]["verdict"] != "passed" for i in omitted):
         raise ValueError("All failed or pending questions must be selected for reading")
+    for case_id in omitted:
+        case = original[case_id]
+        tagged = [s for s in case["reading"]["locations"] if "entrypoints" in s]
+        if (case["reading"].get("unanswered")
+                or ("reading_fingerprint" in case and case["reading_fingerprint"] != hb.reading_fingerprint(case["reading"]))
+                or (tagged and {e for s in tagged for e in s["entrypoints"]} != set(case["entrypoints"]))):
+            raise ValueError("Unselected answer has conflicting reading evidence; select it for reading: " + case_id)
     if omitted and (scope_record["reader"]["isolation"] != "independent"
                     or any(original[i]["reading"]["status"] != "answered"
                            or not original[i]["reading"]["answer"].strip()
@@ -287,13 +297,29 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
         dest.write_bytes(hb.safe_path(root, page).read_bytes())
         if hb.fingerprint(dest) != frozen_pages[page]:
             raise ValueError("Page changed during snapshot: " + page)
-    questions = [{"id": c["id"], "question": c["question"]} for c in record["scenarios"] if c["id"] in chosen]
+    questions = [{"id": c["id"], "question": c["question"], "entrypoints": c["entrypoints"]}
+                 for c in record["scenarios"] if c["id"] in chosen]
     (session / "reader/questions.json").write_text(encode(questions), encoding="utf-8")
+    guide = ("# 独立阅读任务\n\n只读本目录的手册快照与问题，不读源码、预期答案或生成历史。"
+             "直接填写 answers.json，保留模板字段；不能自己访问源项目补答案。\n\n"
+             "逐题回答问题关联的每个业务动作。answer 写实际理解；问题中不能回答的条件、数据、"
+             "生效、失败或代码定位写入 unanswered，不因忠实反映手册缺失而视作通过。"
+             "部署值、远端内部实现等不影响题目作答的未知可在 answer 中说明，不混入 unanswered。\n\n"
+             "evidence 只含 page 和 section，section 使用以下真实 H2，不用 H3，不添加 note。"
+             "locations 使用 path 加 symbol（Java 为类型#方法）或行号；合并题的每个定位加 entrypoints，"
+             "逐一对应问题中的动作 ID，共用实现可关联多个动作，但代表方法不能证明其他动作。"
+             "说明缺失时如实记录，不猜测或补造定位。格式反馈只按原快照自行修正。\n\n")
+    guide += "\n".join("- " + p + ": " + "；".join(book.pages[p]["sections"]) for p in sorted(frozen_pages)) + "\n"
+    (session / "reader/guide.md").write_text(guide, encoding="utf-8")
     # The reviewer needs facts and locators, not duplicated grading history or the whole original record.
     task = {"root": str(root), "record_path": relative, "target": record["target"],
+            "instructions": ("使用未继承生成历史的新上下文，先独立复述实际实现，再比对本任务。"
+                             "independent 是相对生成者隔离，不是仅与读者不同；生成者自查使用 context=authoring，"
+                             "不得 passed。逐动作检查资源、条件、结果和定位；保留题逐题核对具体 diff 与历史回答，"
+                             "已知错误、无法回答或定位被补写的题不能保留。"),
             "pages": sorted(record["pages"]), "sources": sorted(record["sources"]),
             "entrypoints": [{k: v for k, v in book.entries[e].items()
-                             if k in ("id", "path", "symbol", "line", "trigger", "claims")}
+                             if k in ("id", "kind", "path", "symbol", "line", "trigger", "claims")}
                             for e in sorted(scope)],
             "selected": [], "retained": [], "not_applicable": record["not_applicable"]}
     for case in record["scenarios"]:
@@ -309,10 +335,13 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
               "frozen_pages": frozen_pages,
               "draft_fingerprint": hb.fingerprint(record_path(root, relative)),
               "questions_fingerprint": hb.fingerprint(session / "reader/questions.json"),
+              "reader_guide_fingerprint": hb.fingerprint(session / "reader/guide.md"),
               "source_task_fingerprint": hb.fingerprint(session / "source-task.json"),
+              "entry_actions": {entry["id"]: entry for entry in task["entrypoints"]},
               "entry_claims": {e: book.entries[e]["claims"] for e in scope}}
     (session / "packet.json").write_text(encode(packet), encoding="utf-8")
-    source_template = {"status": "pending", "isolation": "unavailable", "description": "Awaiting actual source feedback",
+    source_template = {"status": "pending", "isolation": "unavailable", "context": "unavailable",
+                       "description": "Actual reviewer and isolation from the author; not merely from the reader",
                        "findings": [], "retained": {i: "" for i in sorted(omitted)}}
     reader_template = {"reader": {"isolation": "unavailable", "description": "Awaiting actual independent reader"},
                        "scenarios": [{"id": i, "reading": empty_reading()} for i in sorted(chosen)]}
@@ -324,6 +353,7 @@ def prepare(root, relative, session=None, selected=None, pages=None, retain_all=
     return {"session": str(session), "source_packet": str(session / "packet.json"),
             "source_task": str(session / "source-task.json"),
             "reader_directory": str(session / "reader"), "questions": len(questions),
+            "reader_guide": str(session / "reader/guide.md"),
             "reader_feedback": str(session / "reader/answers.json"),
             "source_feedback": str(session / "source-feedback.json"),
             "graded_feedback": str(session / "graded-feedback.json"),
@@ -350,6 +380,8 @@ def load_current(root, session):
             raise ValueError("Reader snapshot changed; prepare again: " + path)
     if hb.fingerprint(session / "reader/questions.json") != packet["questions_fingerprint"]:
         raise ValueError("Reader questions changed; prepare again")
+    if packet.get("reader_guide_fingerprint") and hb.fingerprint(session / "reader/guide.md") != packet["reader_guide_fingerprint"]:
+        raise ValueError("Reader guide changed; prepare again")
     if packet.get("source_task_fingerprint") and hb.fingerprint(session / "source-task.json") != packet["source_task_fingerprint"]:
         raise ValueError("Source task changed; prepare again")
     current = read(record_path(root, packet["record_path"]))
@@ -360,6 +392,11 @@ def load_current(root, session):
     for entry_id, claims in packet["entry_claims"].items():
         if entry_id not in book.entries or book.entries[entry_id]["claims"] != claims:
             raise ValueError("Entry evidence changed; prepare again: " + entry_id)
+    for entry_id, action in packet.get("entry_actions", {}).items():
+        current = {k: v for k, v in book.entries[entry_id].items()
+                   if k in ("id", "kind", "path", "symbol", "line", "trigger", "claims")}
+        if current != action:
+            raise ValueError("Entry action changed; prepare again: " + entry_id)
     return book, packet
 
 
@@ -367,13 +404,13 @@ def seal(root, session, feedback):
     book, packet = load_current(root, session)
     if (session / "source.json").exists():
         raise ValueError("Source feedback already sealed; prepare a new revision")
-    required = {"status", "isolation", "description", "findings", "retained"}
+    required = {"status", "isolation", "context", "description", "findings", "retained"}
     if set(feedback) != required:
-        raise ValueError("Source feedback requires status, isolation, description, findings, retained")
+        raise ValueError("Source feedback requires status, isolation, context, description, findings, retained")
     proof = {k: feedback[k] for k in required - {"retained"}}
     proof["input_fingerprint"] = hb.review_input_fingerprint(packet["record"])
     checked(proof, book.review_schema["properties"]["source_review"] | {"$defs": book.review_schema["$defs"]})
-    if proof["status"] == "passed" and (proof["isolation"] != "independent" or proof["findings"]):
+    if proof["status"] == "passed" and (proof["isolation"] != "independent" or proof["context"] != "fresh" or proof["findings"]):
         raise ValueError("Unresolved or unavailable source review cannot pass")
     if proof["status"] == "pending":
         raise ValueError("Seal actual completed feedback, not pending work")
@@ -386,6 +423,96 @@ def seal(root, session, feedback):
     (session / "source.json").write_text(encode(result), encoding="utf-8")
     return {"status": proof["status"], "reader_allowed": proof["status"] == "passed",
             "reader_required": bool(packet["selected"])}
+
+
+def reading_report(book, packet, raw, passing):
+    """Collect feedback problems once; never repair or grade the reader's answers."""
+    issues = []
+
+    def issue(code, path, message):
+        issues.append({"code": code, "path": path, "message": message})
+
+    reading_schema = copy.deepcopy(book.review_schema["$defs"]["scenario"]["properties"]["reading"])
+    reading_schema["required"].append("unanswered")
+    schema = {"type": "object", "additionalProperties": False, "required": ["reader", "scenarios"],
+              "$defs": book.review_schema["$defs"], "properties": {
+                  "reader": book.review_schema["properties"]["reader"],
+                  "scenarios": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                      "required": ["id", "reading"], "properties": {
+                          "id": {"$ref": "#/$defs/id"}, "reading": reading_schema}}}}}
+    for error in hb.validate(raw, schema, schema):
+        issue("reading-format", "reader/answers.json", error)
+    if not isinstance(raw, dict) or not isinstance(raw.get("scenarios"), list):
+        return {"valid": False, "issues": issues}
+    cases = {c["id"]: c for c in packet["record"]["scenarios"]}
+    selected, seen = set(packet["selected"]), []
+    for value in raw["scenarios"]:
+        if not isinstance(value, dict) or not isinstance(value.get("id"), str):
+            continue
+        case_id = value["id"]
+        seen.append(case_id)
+        reading = value.get("reading")
+        if case_id not in selected or not isinstance(reading, dict):
+            continue
+        path = "reader/answers.json/scenarios/" + case_id
+        passed = case_id in passing
+        if passed:
+            reader = raw.get("reader", {})
+            if (not isinstance(reader, dict) or reader.get("isolation") != "independent"
+                    or reading.get("status") != "answered" or not isinstance(reading.get("answer"), str)
+                    or not reading.get("answer", "").strip()):
+                issue("reading-unavailable", path, "Passed scenario requires an actual independent answer")
+            if reading.get("unanswered"):
+                issue("reading-unanswered", path, "Business questions remain unanswered; save failed and repair")
+            for field in ("evidence", "locations"):
+                if not reading.get(field):
+                    issue("reading-missing", path, "Passed scenario requires evidence and code location: " + field)
+        covered = set()
+        for locator in reading.get("locations", []) if isinstance(reading.get("locations"), list) else []:
+            if not isinstance(locator, dict) or not isinstance(locator.get("path"), str):
+                continue
+            try:
+                hb.safe_path(book.root, locator["path"])
+            except ValueError as exc:
+                issue("reading-path", path, str(exc))
+            if not passed:
+                continue  # Preserve failed answers, including their wrong or missing locations.
+            if locator["path"] not in packet["record"]["sources"]:
+                issue("reading-location", path, "Reading location is outside fingerprinted sources: " + locator["path"])
+            if not locator.get("symbol") and not locator.get("line"):
+                issue("reading-location", path, "Reading location requires symbol or line")
+            symbol = locator.get("symbol", "")
+            if (locator["path"].endswith(".java") and isinstance(symbol, str)
+                    and "#" not in symbol and "line" not in locator):
+                issue("reading-location", path, "Reading location must identify a handler, not just a Java class")
+            tags = locator.get("entrypoints", [])
+            if isinstance(tags, list) and all(isinstance(e, str) for e in tags):
+                covered.update(tags)
+        if passed and (len(cases[case_id]["entrypoints"]) > 1 or covered):
+            if covered != set(cases[case_id]["entrypoints"]):
+                issue("reading-actions", path, "Reading locations must cover exactly the scoped actions with entrypoints tags")
+        for evidence in reading.get("evidence", []) if isinstance(reading.get("evidence"), list) else []:
+            if not isinstance(evidence, dict) or not isinstance(evidence.get("page"), str):
+                continue
+            page = evidence["page"]
+            try:
+                hb.safe_path(book.root, page)
+            except ValueError as exc:
+                issue("reading-path", path, str(exc))
+            if passed and (page not in packet["record"]["pages"]
+                           or evidence.get("section") not in book.pages.get(page, {}).get("sections", [])):
+                issue("reading-evidence", path, "Reading evidence requires a fingerprinted page and real H2: " + page)
+    if set(seen) != selected or len(seen) != len(set(seen)):
+        issue("reading-scope", "reader/answers.json", "Reader output must cover exactly the selected questions without duplicates")
+    return {"valid": not issues, "issues": issues}
+
+
+def reading_plan(root, session):
+    book, packet = load_current(root, session)
+    report = reading_report(book, packet, read(session / "reader/answers.json"), set(packet["selected"]))
+    report.update(session=str(session), read_only=True,
+                  limits=["Format, scope and explicit unanswered items only; this does not grade business semantics."])
+    return report
 
 
 def replace_files(updates):
@@ -429,12 +556,9 @@ def finish(root, session, feedback):
     if len(answers) != len(supplied) or set(answers) != set(packet["selected"]):
         raise ValueError("Reading feedback must cover exactly the selected questions")
     raw = read(session / "reader/answers.json")
-    if set(raw) != {"reader", "scenarios"}:
-        raise ValueError("Reader output requires reader and scenarios")
-    checked(raw["reader"], book.review_schema["properties"]["reader"] | {"$defs": book.review_schema["$defs"]})
-    if not isinstance(raw["scenarios"], list) or any(not isinstance(c, dict) or set(c) != {"id", "reading"}
-                                                   for c in raw["scenarios"]):
-        raise ValueError("Reader answers require id and original reading")
+    report = reading_report(book, packet, raw, {i for i, a in answers.items() if a["verdict"] == "passed"})
+    if report["issues"]:
+        raise PlanError(report["issues"])
     readings = {c["id"]: c["reading"] for c in raw["scenarios"]}
     if len(readings) != len(raw["scenarios"]) or set(readings) != set(packet["selected"]):
         raise ValueError("Reader output must cover exactly the selected questions")
@@ -455,8 +579,11 @@ def finish(root, session, feedback):
             if case["verdict"] not in ("passed", "failed"):
                 raise ValueError("Finish requires actual grading")
             if prior["verdict"] != "pending":
-                case["assessment"] = ("Previous " + prior["verdict"] + " at " + str(prior["reviewed_at"])
-                                      + ": " + prior["assessment"] + "\nRecheck: " + case["assessment"])
+                previous = {k: copy.deepcopy(prior[k]) for k in
+                            ("reading", "verdict", "assessment", "reviewed_at")}
+                if "reading_fingerprint" in prior:
+                    previous["reading_fingerprint"] = prior["reading_fingerprint"]
+                case.setdefault("history", []).append(previous)
         else:
             case.update({k: prior[k] for k in ("reading", "verdict")})
             if "reading_fingerprint" in prior:
@@ -504,7 +631,11 @@ def main():
     try:
         root = args.root.resolve()
         session = args.session.resolve() if args.session else None
-        if args.phase in ("draft", "plan"):
+        if args.phase == "plan" and args.session:
+            if args.record or args.scenario or args.page or args.retain_all or args.result or args.input:
+                parser.error("reading plan requires only --session")
+            result = reading_plan(root, session)
+        elif args.phase in ("draft", "plan"):
             if (not args.record or args.session or args.scenario or args.page or args.retain_all or args.result
                     or (args.phase == "draft") != bool(args.input)):
                 parser.error("draft requires --record and --input; plan requires only --record")

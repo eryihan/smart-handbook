@@ -463,6 +463,7 @@ class Handbook:
                          and not s["reading"]["locations"] for s in record["scenarios"]))
         if proof["status"] == "passed":
             if (proof["isolation"] != "independent" or proof["findings"]
+                    or proof.get("context", "fresh") != "fresh"
                     or proof["input_fingerprint"] != review_input_fingerprint(record)
                     or not record["prepared_at"] or not record["source_reviewed_at"]):
                 raise ValueError("Source review requires independent, resolved, fingerprinted evidence")
@@ -505,12 +506,27 @@ class Handbook:
             source_refs(scenario["expected"]["sources"])
             if "reading_fingerprint" in scenario and scenario["reading_fingerprint"] != reading_fingerprint(scenario["reading"]):
                 raise ValueError("Saved reading differs from its original feedback fingerprint")
+            for previous in scenario.get("history", []):
+                if ("reading_fingerprint" in previous
+                        and previous["reading_fingerprint"] != reading_fingerprint(previous["reading"])):
+                    raise ValueError("Historical reading differs from its feedback fingerprint")
+                for locator in previous["reading"]["locations"]:
+                    safe_path(self.root, locator["path"])
+                for evidence in previous["reading"]["evidence"]:
+                    safe_path(self.root, evidence["page"])
             for locator in scenario["reading"]["locations"]:
                 safe_path(self.root, locator["path"])
             for evidence in scenario["reading"]["evidence"]:
                 safe_path(self.root, evidence["page"])
             # Failed answers must preserve incorrect or missing citations/locations as evidence of failure.
             if scenario["verdict"] == "passed":
+                if scenario["reading"].get("unanswered"):
+                    raise ValueError("Passed scenario has unanswered business questions: " + scenario["id"])
+                tagged = [s for s in scenario["reading"]["locations"] if "entrypoints" in s]
+                if tagged:
+                    covered = {e for s in tagged for e in s["entrypoints"]}
+                    if covered != set(scenario["entrypoints"]):
+                        raise ValueError("Reading locations must cover exactly the scoped actions: " + scenario["id"])
                 for source in scenario["reading"]["locations"]:
                     source_refs([source])
                     if not source.get("symbol") and not source.get("line"):
@@ -623,6 +639,30 @@ class Handbook:
                                      "unverified_sources": sorted(sources - verified_sources)}
         return states, units
 
+    def review_attention(self):
+        """Expose evidence limits for Agent triage, without guessing answer semantics."""
+        rows = []
+        for rel, record in self.reviews.items():
+            scope = sorted({e for s in record["scenarios"] for e in s["entrypoints"]})
+            if record["source_review"]["status"] == "passed" and "context" not in record["source_review"]:
+                rows.append({"record": rel, "entrypoints": scope, "scenarios": [],
+                             "reasons": ["source-context-unconfirmed"]})
+            for case in record["scenarios"]:
+                if case["verdict"] != "passed":
+                    continue
+                reasons = []
+                if "reading_fingerprint" not in case:
+                    reasons.append("original-reading-unbound")
+                if "unanswered" not in case["reading"]:
+                    reasons.append("unanswered-not-declared")
+                if len(case["entrypoints"]) > 1 and not any(
+                        "entrypoints" in s for s in case["reading"]["locations"]):
+                    reasons.append("grouped-actions-unmapped")
+                if reasons:
+                    rows.append({"record": rel, "entrypoints": case["entrypoints"],
+                                 "scenarios": [case["id"]], "reasons": reasons})
+        return rows
+
     def inventory_candidates(self, changed):
         """Follow only dependencies recorded by the Agent; return review candidates."""
         if self.inventory is None:
@@ -667,11 +707,16 @@ class Handbook:
                 if entries[entry_id]["status"] == "accepted":
                     entries[entry_id]["status"] = "needs-review"
         recorded = self.inventory["status"]
+        action_candidates = sorted(e for e, entry in self.entries.items() if entry.get("kind") != "action")
+        if action_candidates:
+            self.issue("warning", "entry-actions-unconfirmed", INVENTORY_PATH,
+                       str(len(action_candidates)) + " actions need confirmation; see inventory.action_candidates, not a full reanalysis queue")
         ready = (not changed and not unknown and not self.inventory["discovery"]["remaining"]
                  and all(f["disposition"] != "pending" for f in self.inventory["files"])
                  and bool(self.inventory["discovery"]["checked"]) and bool(self.inventory["discovery"]["methods"]))
         if self.inventory["mode"] == "full":
-            ready = ready and bool(units) and all(u["status"] == "accepted" for u in units.values())
+            ready = (ready and not action_candidates and bool(units)
+                     and all(u["status"] == "accepted" for u in units.values()))
         if recorded == "complete" and not ready and not (changed or unknown):
             self.issue("error", "inventory-completion-conflict", INVENTORY_PATH,
                        "Recorded completion is not supported by entry reviews and coverage")
@@ -679,6 +724,8 @@ class Handbook:
                 "status": "incomplete" if not ready and recorded == "complete" else recorded,
                 "ready_to_complete": bool(ready), "entries": entries, "units": units,
                 "next_entries": [entry_id for entry_id, value in entries.items() if value["status"] != "accepted"],
+                "action_candidates": action_candidates,
+                "review_attention": self.review_attention(),
                 "changed_files": sorted(changed), "unknown_files": sorted(unknown),
                 "related_units": related}
 
@@ -1004,7 +1051,19 @@ def impact(book, base=None, target=None):
 def render(result):
     rows = [result["command"] + (" (candidate impact only)" if result["command"] == "impact" else " (mechanical checks only)")]
     if result["command"] == "check":
-        rows.append("Inventory: " + json.dumps(result["inventory"], ensure_ascii=False))
+        inventory = result["inventory"]
+        rows.append("Inventory: " + json.dumps({k: inventory.get(k) for k in
+                    ("mode", "recorded_status", "status", "ready_to_complete")}, ensure_ascii=False))
+        for key in ("next_entries", "action_candidates"):
+            values = inventory.get(key, [])
+            rows.append(key + ": " + str(len(values)) + "; first 10: " + json.dumps(values[:10]))
+        attention = inventory.get("review_attention", [])
+        reasons = {}
+        for item in attention:
+            for reason in item["reasons"]:
+                reasons[reason] = reasons.get(reason, 0) + 1
+        rows.append("review_attention: " + str(len(attention)) + "; " + json.dumps(reasons))
+        rows.append("Use --format json for complete queues and evidence details; the text preview is not the full scope.")
         for path, page in result["pages"].items():
             rows.append(path + ": " + page["coverage"] + " / " + page["source_state"] + " / " + page["review"])
     else:

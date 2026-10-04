@@ -288,6 +288,9 @@
         "id": {
           "$ref": "#/$defs/id"
         },
+        "kind": {
+          "enum": ["candidate", "action"]
+        },
         "path": {
           "$ref": "#/$defs/text"
         },

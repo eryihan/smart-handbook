@@ -34,7 +34,7 @@ class ReviewToolTest(unittest.TestCase):
         return review.prepare(self.root, self.relative, self.session, selected)
 
     def seal(self, **changes):
-        value = {"status": "passed", "isolation": "independent", "description": "synthetic source feedback",
+        value = {"status": "passed", "isolation": "independent", "context": "fresh", "description": "synthetic source feedback",
                  "findings": [], "retained": {}}
         value.update(changes)
         return review.seal(self.root, self.session, value)
@@ -181,7 +181,7 @@ class ReviewToolTest(unittest.TestCase):
             self.assertEqual(source["status"], "pending")
             with self.assertRaisesRegex(ValueError, "not pending"):
                 review.seal(self.root, session, source)
-            review.seal(self.root, session, {"status": "passed", "isolation": "independent",
+            review.seal(self.root, session, {"status": "passed", "isolation": "independent", "context": "fresh",
                 "description": "synthetic actual feedback", "findings": [], "retained": {}})
             with self.assertRaisesRegex(ValueError, "actual grading"):
                 review.finish(self.root, session, review.read(Path(result["graded_feedback"])))
@@ -200,7 +200,7 @@ class ReviewToolTest(unittest.TestCase):
         graded = review.read(Path(result["graded_feedback"]))
         self.assertEqual(source["retained"], {"approve-second": ""})
         self.assertEqual([c["id"] for c in graded["scenarios"]], ["approve-normal"])
-        source.update(status="passed", isolation="independent")
+        source.update(status="passed", isolation="independent", context="fresh")
         with self.assertRaisesRegex(ValueError, "explicit source/diff"):
             review.seal(self.root, self.session, source)
 
@@ -246,7 +246,7 @@ class ReviewToolTest(unittest.TestCase):
         prepared = invoke("prepare", "--record", relative)
         session = Path(prepared["session"])
         self.addCleanup(shutil.rmtree, session)
-        source = {"status": "passed", "isolation": "independent", "description": "synthetic CLI feedback",
+        source = {"status": "passed", "isolation": "independent", "context": "fresh", "description": "synthetic CLI feedback",
                   "findings": [], "retained": {}}
         Path(prepared["source_feedback"]).write_text(json.dumps(source), encoding="utf-8")
         invoke("seal", "--session", str(session), "--result", prepared["source_feedback"])
@@ -293,7 +293,7 @@ class ReviewToolTest(unittest.TestCase):
         files = list((self.session / "reader").rglob("*"))
         self.assertFalse(any(p.name.startswith(".") and p.is_file() for p in files))
         questions = review.read(self.session / "reader/questions.json")
-        self.assertEqual(set(questions[0]), {"id", "question"})
+        self.assertEqual(set(questions[0]), {"id", "question", "entrypoints"})
         self.assertNotIn("expected", json.dumps(questions))
         self.assertEqual(result["questions"], 1)
 
@@ -452,7 +452,7 @@ class ReviewToolTest(unittest.TestCase):
         result = subprocess.run(arguments, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         source_file = Path(self.temporary.name) / "source-feedback.json"
-        source_file.write_text(json.dumps({"status": "passed", "isolation": "independent",
+        source_file.write_text(json.dumps({"status": "passed", "isolation": "independent", "context": "fresh",
                                           "description": "synthetic CLI feedback", "findings": [], "retained": {}}))
         graded_file = Path(self.temporary.name) / "graded-feedback.json"
         graded_file.write_text(json.dumps(self.feedback()))
@@ -688,7 +688,7 @@ class ReviewToolTest(unittest.TestCase):
         path.write_text(path.read_text() + "\n")
         session = Path(self.temporary.name) / "retained-session"
         review.prepare(self.root, self.relative, session, retain_all=True)
-        review.seal(self.root, session, {"status": "passed", "isolation": "independent",
+        review.seal(self.root, session, {"status": "passed", "isolation": "independent", "context": "fresh",
             "description": "synthetic retained source feedback", "findings": [],
             "retained": {original["id"]: "Only trailing newline changed; answer, H2 and handler are unchanged"}})
         review.finish(self.root, session, {"scenarios": []})
@@ -696,6 +696,192 @@ class ReviewToolTest(unittest.TestCase):
         self.assertEqual(retained["reading"], original["reading"])
         self.assertEqual(retained["reading_fingerprint"], original["reading_fingerprint"])
         self.assertTrue(self.fixture.check()["inventory"]["ready_to_complete"])
+
+    def test_candidate_action_is_rejected_before_any_review_work(self):
+        self.fixture.inventory["units"][0]["entrypoints"][0]["kind"] = "candidate"
+        self.fixture.save_inventory()
+        with self.assertRaises(review.PlanError) as error:
+            self.prepare()
+        self.assertTrue(any(i["code"] == "plan-action" for i in error.exception.issues))
+        self.assertFalse(self.session.exists())
+
+    def test_changing_action_identity_during_review_blocks_save_without_source_diff(self):
+        self.prepare()
+        self.seal()
+        self.fixture.inventory["units"][0]["entrypoints"][0]["trigger"] = "different business action"
+        self.fixture.save_inventory()
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "Entry action changed"):
+            review.finish(self.root, self.session, self.feedback())
+        self.assertEqual(before, self.project_bytes())
+
+    def test_source_authoring_or_missing_context_cannot_seal_as_passed(self):
+        self.prepare()
+        for context in ("authoring", "unavailable"):
+            with self.assertRaisesRegex(ValueError, "cannot pass"):
+                self.seal(context=context)
+        value = {"status": "passed", "isolation": "independent", "description": "author self-check",
+                 "findings": [], "retained": {}}
+        with self.assertRaisesRegex(ValueError, "context"):
+            review.seal(self.root, self.session, value)
+        self.assertFalse((self.session / "source.json").exists())
+
+    def test_reading_plan_aggregates_format_locations_and_h2_without_writing(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        reading = raw["scenarios"][0]["reading"]
+        reading["evidence"][0].update(section="H3 subheading", note="unsupported")
+        reading["locations"][0]["symbol"] = "ApprovalService"
+        path.write_text(json.dumps(raw))
+        before, original = self.project_bytes(), path.read_bytes()
+        result = review.reading_plan(self.root, self.session)
+        self.assertFalse(result["valid"])
+        self.assertEqual({i["code"] for i in result["issues"]},
+                         {"reading-format", "reading-evidence", "reading-location"})
+        with self.assertRaises(review.PlanError) as error:
+            review.finish(self.root, self.session, grade)
+        self.assertEqual(result["issues"], error.exception.issues)
+        self.assertEqual(before, self.project_bytes())
+        self.assertEqual(original, path.read_bytes())
+
+    def test_unanswered_reader_result_cannot_be_overridden_but_can_be_saved_failed(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        raw["scenarios"][0]["reading"]["unanswered"] = ["The handbook does not identify modified tables"]
+        path.write_text(json.dumps(raw))
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "remain unanswered"):
+            review.finish(self.root, self.session, grade)
+        self.assertEqual(before, self.project_bytes())
+        grade["scenarios"][0]["verdict"] = "failed"
+        review.finish(self.root, self.session, grade)
+        saved = review.read(self.root / self.relative)["scenarios"][0]
+        self.assertEqual(saved["reading"], raw["scenarios"][0]["reading"])
+        with self.assertRaises(ValueError):
+            review.prepare(self.root, self.relative, Path(self.temporary.name) / "retained", retain_all=True)
+
+    def test_new_reader_output_requires_explicit_unanswered_even_when_grader_says_passed(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        del raw["scenarios"][0]["reading"]["unanswered"]
+        path.write_text(json.dumps(raw))
+        with self.assertRaisesRegex(ValueError, "missing unanswered"):
+            review.finish(self.root, self.session, grade)
+
+    def test_reading_plan_returns_schema_errors_for_wrong_value_types(self):
+        self.prepare()
+        self.seal()
+        self.feedback()
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        raw["scenarios"][0]["reading"]["locations"][0]["symbol"] = 5
+        raw["scenarios"][0]["reading"]["unanswered"] = "wrong type"
+        path.write_text(json.dumps(raw))
+        report = review.reading_plan(self.root, self.session)
+        self.assertFalse(report["valid"])
+        self.assertEqual(sum(i["code"] == "reading-format" for i in report["issues"]), 2)
+
+    def test_known_conflicting_passed_reading_cannot_be_retained(self):
+        self.fixture.record["scenarios"][0]["reading"]["unanswered"] = ["Cannot find the handler"]
+        self.fixture.save_review()
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "conflicting reading evidence"):
+            review.prepare(self.root, self.relative, self.session, retain_all=True)
+        self.assertEqual(before, self.project_bytes())
+        self.assertFalse(self.session.exists())
+
+    def test_rereading_preserves_actual_failed_answer_without_nesting_assessments(self):
+        self.prepare()
+        self.seal()
+        grade = self.feedback(failed=True)
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        raw["scenarios"][0]["reading"]["unanswered"] = ["Cannot locate the handler"]
+        path.write_text(json.dumps(raw))
+        review.finish(self.root, self.session, grade)
+        failed = review.read(self.root / self.relative)["scenarios"][0]
+        session = Path(self.temporary.name) / "retry"
+        review.prepare(self.root, self.relative, session)
+        review.seal(self.root, session, {"status": "passed", "isolation": "independent", "context": "fresh",
+            "description": "synthetic independent reviewer", "findings": [], "retained": {}})
+        review.finish(self.root, session, self.feedback(session=session))
+        case = review.read(self.root / self.relative)["scenarios"][0]
+        self.assertEqual(case["history"][-1]["reading"], failed["reading"])
+        self.assertEqual(case["history"][-1]["reviewed_at"], failed["reviewed_at"])
+        self.assertEqual(case["history"][-1]["verdict"], "failed")
+        self.assertEqual(case["assessment"], "Actual feedback fixture")
+        self.assertEqual(case["history"][-1]["reading_fingerprint"], failed["reading_fingerprint"])
+        case["history"][-1]["reading"]["answer"] = "rewritten historical answer"
+        record = review.read(self.root / self.relative)
+        record["scenarios"][0] = case
+        (self.root / self.relative).write_text(json.dumps(record))
+        self.assertIn("review-invalid", self.fixture.codes(self.fixture.check()))
+
+    def test_grouped_reading_requires_locations_for_each_scoped_action(self):
+        f = self.fixture
+        second = copy.deepcopy(f.inventory["units"][0]["entrypoints"][0])
+        second.update(id="approve-other")
+        f.inventory["units"][0]["entrypoints"].append(second)
+        f.record["scenarios"][0]["entrypoints"].append("approve-other")
+        f.record["not_applicable"]["approve-other"] = copy.deepcopy(f.record["not_applicable"]["approve"])
+        f.save_inventory()
+        f.save_review()
+        self.prepare()
+        self.seal()
+        grade = self.feedback()
+        path = self.session / "reader/answers.json"
+        raw = review.read(path)
+        raw["scenarios"][0]["reading"]["locations"][0]["entrypoints"] = ["approve"]
+        path.write_text(json.dumps(raw))
+        before = self.project_bytes()
+        with self.assertRaisesRegex(ValueError, "scoped actions"):
+            review.finish(self.root, self.session, grade)
+        self.assertEqual(before, self.project_bytes())
+        raw["scenarios"][0]["reading"]["locations"][0]["entrypoints"].append("approve-other")
+        path.write_text(json.dumps(raw))
+        review.finish(self.root, self.session, grade)
+        self.assertTrue(f.check()["inventory"]["ready_to_complete"])
+
+    def test_valid_legacy_reading_can_be_retained_without_fabricating_new_fields(self):
+        f = self.fixture
+        f.record["source_review"].pop("context")
+        f.record["scenarios"][0]["reading"].pop("unanswered")
+        f.save_review()
+        old = copy.deepcopy(f.record["scenarios"][0]["reading"])
+        review.prepare(self.root, self.relative, self.session, retain_all=True)
+        self.seal(retained={"approve-normal": "Synthetic original report confirms the unchanged answer, evidence and handler"})
+        review.finish(self.root, self.session, {"scenarios": []})
+        saved = review.read(self.root / self.relative)["scenarios"][0]
+        self.assertEqual(saved["reading"], old)
+        self.assertNotIn("reading_fingerprint", saved)
+        self.assertNotIn("unanswered", saved["reading"])
+
+    def test_plan_session_cli_is_read_only_and_guide_is_frozen(self):
+        result = self.prepare()
+        self.seal()
+        self.feedback()
+        before = self.project_bytes()
+        command = [sys.executable, str(SKILL / "scripts/review.py"), "plan", "--root", str(self.root),
+                   "--session", str(self.session)]
+        output = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(output.returncode, 0, output.stderr)
+        self.assertTrue(json.loads(output.stdout)["valid"])
+        self.assertEqual(before, self.project_bytes())
+        guide = Path(result["reader_guide"])
+        self.assertIn("当前行为与关键约束", guide.read_text())
+        self.assertNotIn(self.fixture.record["scenarios"][0]["expected"]["answer"], guide.read_text())
+        guide.write_text(guide.read_text() + "\nadditional hint")
+        with self.assertRaisesRegex(ValueError, "Reader guide changed"):
+            review.reading_plan(self.root, self.session)
 
 
 if __name__ == "__main__":

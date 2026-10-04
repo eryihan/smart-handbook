@@ -117,6 +117,9 @@
             "unavailable"
           ]
         },
+        "context": {
+          "enum": ["fresh", "authoring", "unavailable"]
+        },
         "description": {
           "$ref": "#/$defs/text"
         },
@@ -176,6 +179,11 @@
         "line": {
           "type": "integer",
           "minimum": 1
+        },
+        "entrypoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/id"}
         }
       }
     },
@@ -290,6 +298,10 @@
             "answer": {
               "type": "string"
             },
+            "unanswered": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/text"}
+            },
             "evidence": {
               "type": "array",
               "items": {
@@ -320,6 +332,21 @@
         "reading_fingerprint": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reading", "verdict", "assessment", "reviewed_at"],
+            "properties": {
+              "reading": {"$ref": "#/$defs/scenario/properties/reading"},
+              "reading_fingerprint": {"$ref": "#/$defs/scenario/properties/reading_fingerprint"},
+              "verdict": {"enum": ["passed", "failed"]},
+              "assessment": {"type": "string"},
+              "reviewed_at": {"$ref": "#/$defs/time"}
+            }
+          }
         },
         "verdict": {
           "enum": [

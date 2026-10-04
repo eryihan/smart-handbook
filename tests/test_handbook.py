@@ -61,7 +61,7 @@ class HandbookTest(unittest.TestCase):
                       for path in (self.source, "config/application.yml")],
             "units": [{"id": "business-approval", "name": "审批",
                        "entrypoints": [{"id": "approve", "path": self.source, "symbol": "ApprovalService#approve(String)",
-                                        "trigger": "fixture API", "status": "accepted", "claims": ["approval-01"],
+                                        "trigger": "fixture API", "kind": "action", "status": "accepted", "claims": ["approval-01"],
                                         "gaps": [], "reviews": [".smart-handbook/.reviews/approval.json"]}],
                        "pages": [self.module, self.flow], "sources": [self.source],
                        "depends_on": [], "gaps": []}]}
@@ -72,14 +72,14 @@ class HandbookTest(unittest.TestCase):
             "sources": {self.source: hb.fingerprint(self.root / self.source)},
             "pages": {self.module: hb.fingerprint(self.root / self.module)},
             "prepared_at": "2026-10-01T09:59:00Z",
-            "source_review": {"status": "passed", "isolation": "independent", "description": "synthetic source-review fixture",
+            "source_review": {"status": "passed", "isolation": "independent", "context": "fresh", "description": "synthetic source-review fixture",
                               "input_fingerprint": None, "findings": []},
             "source_reviewed_at": "2026-10-01T10:00:00Z",
             "reader": {"isolation": "independent", "description": "synthetic record, no real AI reading"},
             "scenarios": [{"id": "approve-normal", "entrypoints": ["approve"], "topics": ["normal"],
                 "question": "What does approve do?",
                 "expected": {"answer": "Returns without changes", "sources": [{"path": self.source, "symbol": "ApprovalService#approve(String)"}]},
-                "reading": {"status": "answered", "answer": "Returns without changes",
+                "reading": {"status": "answered", "answer": "Returns without changes", "unanswered": [],
                     "evidence": [{"page": self.module, "section": "当前行为与关键约束"}],
                     "locations": [{"path": self.source, "symbol": "ApprovalService#approve(String)"}]},
                 "verdict": "passed", "assessment": "Synthetic fixture only", "reviewed_at": "2026-10-01T10:01:00Z"}],
@@ -106,6 +106,54 @@ class HandbookTest(unittest.TestCase):
         self.inventory["units"][0]["entrypoints"][0]["symbol"] = "ApprovalService"
         self.save_inventory()
         self.assertIn("inventory-invalid", self.codes(self.check()))
+
+    def test_unconfirmed_action_granularity_blocks_completion_without_resetting_reviews(self):
+        self.inventory["status"] = "complete"
+        entry = self.inventory["units"][0]["entrypoints"][0]
+        entry.pop("kind")
+        self.save_inventory()
+        before = (self.root / self.review_path).read_bytes()
+        result = self.check()
+        self.assertEqual(result["inventory"]["action_candidates"], ["approve"])
+        self.assertEqual(result["inventory"]["next_entries"], [])
+        self.assertFalse(result["inventory"]["ready_to_complete"])
+        self.assertEqual(result["inventory"]["entries"]["approve"]["status"], "accepted")
+        self.assertEqual(before, (self.root / self.review_path).read_bytes())
+        entry["kind"] = "action"  # Fixture simulates confirming the actual handler, not rereading business.
+        self.save_inventory()
+        self.assertTrue(self.check()["inventory"]["ready_to_complete"])
+
+    def test_legacy_evidence_limits_are_scoped_candidates_not_automatic_reading_failures(self):
+        self.record["source_review"].pop("context")
+        self.record["scenarios"][0]["reading"].pop("unanswered")
+        self.save_review()
+        result = self.check()
+        attention = result["inventory"]["review_attention"]
+        self.assertTrue(any("source-context-unconfirmed" in r["reasons"] for r in attention))
+        self.assertTrue(any("original-reading-unbound" in r["reasons"] for r in attention))
+        self.assertTrue(all(r["entrypoints"] == ["approve"] for r in attention))
+        self.assertEqual(result["inventory"]["next_entries"], [])
+        self.assertNotIn("review-invalid", self.codes(result))
+
+    def test_explicit_unanswered_business_question_cannot_be_passed(self):
+        self.record["scenarios"][0]["reading"]["unanswered"] = ["Cannot locate the save handler"]
+        self.save_review()
+        result = self.check()
+        self.assertIn("review-invalid", self.codes(result))
+        self.assertFalse(result["inventory"]["ready_to_complete"])
+
+    def test_authoring_context_cannot_certify_independent_source_review(self):
+        self.record["source_review"]["context"] = "authoring"
+        self.save_review()
+        self.assertIn("review-invalid", self.codes(self.check()))
+
+    def test_text_check_preview_is_bounded_without_truncating_json_queues(self):
+        result = self.check()
+        result["inventory"]["action_candidates"] = ["action-" + str(i) for i in range(20)]
+        text = hb.render(result)
+        self.assertIn("action_candidates: 20; first 10:", text)
+        self.assertNotIn('"action-19"', text)
+        self.assertEqual(len(result["inventory"]["action_candidates"]), 20)
 
     def test_accepted_entry_requires_an_existing_handler_location(self):
         entry = self.inventory["units"][0]["entrypoints"][0]
